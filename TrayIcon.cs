@@ -35,10 +35,19 @@ internal static class TrayIcon
         var window = snapshot?.MostLimited;
         // A stale number must not masquerade as current usage.
         var label = stale ? "!" : window?.Remaining is { } remaining ? $"{Math.Floor(remaining):0}" : "–";
-        using var font = new Font("Segoe UI", label.Length >= 3 ? 16 : 22, FontStyle.Bold, GraphicsUnit.Pixel);
         using var brush = new SolidBrush(stale ? Amber : IsLightTaskbar() ? Color.FromArgb(25, 31, 42) : Color.White);
-        using var format = new StringFormat(StringFormat.GenericTypographic) { Alignment = StringAlignment.Center, LineAlignment = StringAlignment.Center, FormatFlags = StringFormatFlags.NoWrap };
-        graphics.DrawString(label, font, brush, new RectangleF(-2, -3, 36, 32), format);
+        // Fit the actual glyph outlines instead of relying on DrawString layout,
+        // which can wrap or clip digits in a tiny DPI-scaled icon.
+        using var family = new FontFamily("Segoe UI");
+        using var glyphs = new GraphicsPath();
+        glyphs.AddString(label, family, (int)FontStyle.Bold, 24, PointF.Empty, StringFormat.GenericTypographic);
+        var bounds = glyphs.GetBounds();
+        var fit = Math.Min(28f / bounds.Width, 24f / bounds.Height);
+        using var transform = new Matrix(fit, 0, 0, fit,
+            (32 - bounds.Width * fit) / 2 - bounds.X * fit,
+            1 + (24 - bounds.Height * fit) / 2 - bounds.Y * fit);
+        glyphs.Transform(transform);
+        graphics.FillPath(brush, glyphs);
         using var rail = new Pen(Color.FromArgb(110, 130, 145), 3);
         graphics.DrawLine(rail, 4, 30, 28, 30);
         if (!stale && window?.Remaining is { } left && left > 0)

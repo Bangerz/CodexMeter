@@ -8,3 +8,9 @@
 - Launched normally and confirmed the process remained running and responsive. Startup registration was left off.
 - The 15-minute interval is fixed in the app; no 15-minute wall-clock soak was performed. Final tray placement, click interaction, and appearance on the user's display remain for the user to confirm.
 - Preview PNGs are synthetic UI fixtures and are excluded from Git along with the normalized live check output.
+
+## Tray digit fix
+
+- Replaced text layout with fitted glyph outlines to prevent digit wrapping or clipping.
+- Visually checked 4, 40, 44, and 100 at 16, 20, 24, and 32 pixels.
+- Updated both source build and installed executable, then restarted the installed copy.
