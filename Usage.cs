@@ -7,6 +7,16 @@ public sealed record UsageWindow(string BucketId, string BucketName, string Slot
 {
     public double? Remaining => UsedPercent is { } used ? Math.Clamp(100 - used, 0, 100) : null;
     public string PercentText => Remaining is { } remaining ? $"{Math.Floor(remaining):0}%" : "Unavailable";
+    public double? TimeRemainingPercent(DateTimeOffset now) =>
+        ResetsAt is { } reset && DurationMinutes is > 0
+            ? Math.Clamp((reset - now).TotalMinutes / DurationMinutes.Value * 100, 0, 100)
+            : null;
+
+    public string WeekTimeText(DateTimeOffset now) =>
+        DurationMinutes == 10080 && TimeRemainingPercent(now) is { } remaining
+            ? $"{Math.Floor(remaining):0}% of week remaining"
+            : "Week time unavailable";
+
     public string WindowName => DurationMinutes switch
     {
         300 => "5-hour", 10080 => "Weekly", 1440 => "Daily",

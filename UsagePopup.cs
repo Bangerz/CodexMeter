@@ -9,6 +9,7 @@ internal sealed class UsagePopup : Form
     private readonly Label status;
     private readonly Button refresh;
     private readonly ToolTip tips = new();
+    private readonly System.Windows.Forms.Timer repaintTimer = new() { Interval = 60_000 };
     private readonly List<Font> ownedFonts = [];
     public event EventHandler? RefreshRequested;
     [System.ComponentModel.DesignerSerializationVisibility(System.ComponentModel.DesignerSerializationVisibility.Hidden)]
@@ -61,6 +62,8 @@ internal sealed class UsagePopup : Form
         shell.Controls.Add(actions, 0, 3);
         Controls.Add(shell);
         Deactivate += (_, _) => { if (!KeepOpen) Hide(); };
+        repaintTimer.Tick += (_, _) => content.Invalidate(true);
+        VisibleChanged += (_, _) => repaintTimer.Enabled = Visible;
     }
 
     public void UpdateUsage(UsageSnapshot? snapshot, string? error, bool loading, bool stale)
@@ -71,12 +74,14 @@ internal sealed class UsagePopup : Form
         plan.Text = snapshot?.Plan is { Length: > 0 } value ? char.ToUpperInvariant(value[0]) + value[1..] : "Usage";
         var scale = DeviceDpi / 96f;
         var multipleBuckets = snapshot?.Windows.Select(w => w.BucketId).Distinct().Count() > 1;
-        var needsScroll = snapshot?.Windows.Count > 3;
+        var contentHeight = snapshot is { Windows.Count: > 0 }
+            ? snapshot.Windows.Sum(window => window.DurationMinutes == 10080 ? 157 : 131) : 131;
+        var needsScroll = 140 + contentHeight > 580;
         if (snapshot is { Windows.Count: > 0 })
         {
             foreach (var window in snapshot.Windows)
             {
-                var card = new UsageCard(window, multipleBuckets, stale) { Width = (int)(300 * scale) - (needsScroll ? SystemInformation.VerticalScrollBarWidth : 0), Height = (int)(124 * scale),
+                var card = new UsageCard(window, multipleBuckets, stale) { Width = (int)(300 * scale) - (needsScroll ? SystemInformation.VerticalScrollBarWidth : 0), Height = (int)((window.DurationMinutes == 10080 ? 150 : 124) * scale),
                     Margin = new Padding(0, 0, 0, (int)(7 * scale)) };
                 content.Controls.Add(card);
             }
@@ -95,8 +100,7 @@ internal sealed class UsagePopup : Form
             : $"Updated {time} · Every 15 min";
         tips.SetToolTip(status, status.Text);
         refresh.Enabled = !loading;
-        var count = Math.Max(1, snapshot?.Windows.Count ?? 0);
-        ClientSize = new Size((int)(344 * scale), (int)(Math.Min(580, 140 + count * 131) * scale));
+        ClientSize = new Size((int)(344 * scale), (int)(Math.Min(580, 140 + contentHeight) * scale));
         ResumeLayout(true);
         if (Visible) PositionNearTray();
     }
@@ -142,6 +146,7 @@ internal sealed class UsagePopup : Form
     {
         base.Dispose(disposing);
         if (!disposing) return;
+        repaintTimer.Dispose();
         tips.Dispose();
         foreach (var font in ownedFonts) font.Dispose();
     }
@@ -155,13 +160,18 @@ internal sealed class UsageCard : Control
     private readonly UsageWindow window;
     private readonly bool multipleBuckets;
     private readonly bool stale;
+    private static readonly Color WeekTimerColor = Color.FromArgb(245, 190, 82);
     public UsageCard(UsageWindow value, bool multiple, bool isStale)
     {
         window = value; multipleBuckets = multiple; stale = isStale;
         DoubleBuffered = true;
         AccessibleRole = AccessibleRole.StaticText;
-        AccessibleName = $"{window.BucketName}, {window.WindowName}, {window.PercentText} remaining. {window.ResetText(DateTimeOffset.UtcNow)}";
+        UpdateAccessibleName(DateTimeOffset.UtcNow);
     }
+
+    private void UpdateAccessibleName(DateTimeOffset now) => AccessibleName =
+        $"{window.BucketName}, {window.WindowName}, {window.PercentText} quota remaining. "
+        + (window.DurationMinutes == 10080 ? window.WeekTimeText(now) + ". " : "") + window.ResetText(now);
 
     protected override void OnPaint(PaintEventArgs e)
     {
@@ -170,6 +180,8 @@ internal sealed class UsageCard : Control
         graphics.ScaleTransform(DeviceDpi / 96f, DeviceDpi / 96f);
         var logicalWidth = Width / (DeviceDpi / 96f);
         graphics.TextRenderingHint = System.Drawing.Text.TextRenderingHint.ClearTypeGridFit;
+        var now = DateTimeOffset.UtcNow;
+        UpdateAccessibleName(now);
         var color = stale ? Color.FromArgb(164, 173, 188) : TrayIcon.ColorFor(window.Remaining, window.DurationMinutes);
         using var headingFont = new Font("Segoe UI", 13.33f, FontStyle.Regular, GraphicsUnit.Pixel);
         using var numberFont = new Font("Segoe UI", window.Remaining is null ? 28 : 40, FontStyle.Bold, GraphicsUnit.Pixel);
@@ -177,15 +189,29 @@ internal sealed class UsageCard : Control
         using var text = new SolidBrush(Color.FromArgb(235, 240, 248));
         using var muted = new SolidBrush(Color.FromArgb(164, 173, 188));
         using var accent = new SolidBrush(color);
+        using var weekTimer = new SolidBrush(stale ? Color.FromArgb(196, 181, 143) : WeekTimerColor);
         using var track = new SolidBrush(Color.FromArgb(49, 57, 69));
         using var ellipsis = new StringFormat { Trimming = StringTrimming.EllipsisCharacter, FormatFlags = StringFormatFlags.NoWrap };
         var heading = multipleBuckets ? $"{window.BucketName} · {window.WindowName}" : window.WindowName;
         graphics.DrawString(heading, headingFont, text, new RectangleF(0, 0, logicalWidth - 2, 23), ellipsis);
         graphics.DrawString(window.PercentText, numberFont, accent, new RectangleF(-3, 21, 220, 58));
         if (window.Remaining is not null) graphics.DrawString(stale ? "last known" : "remaining", detailFont, muted, logicalWidth - 114, 47);
-        graphics.FillRectangle(track, 1, 83, logicalWidth - 4, 5);
-        if (window.Remaining is { } remaining) graphics.FillRectangle(accent, 1, 83, (float)((logicalWidth - 4) * remaining / 100), 5);
-        graphics.DrawString(window.ResetText(DateTimeOffset.UtcNow), detailFont, muted, new RectangleF(0, 99, logicalWidth, 24), ellipsis);
+        var weekly = window.DurationMinutes == 10080;
+        var laneHeight = weekly ? 6 : 5;
+        graphics.FillRectangle(track, 1, 83, logicalWidth - 4, laneHeight);
+        if (window.Remaining is { } remaining) graphics.FillRectangle(accent, 1, 83, (float)((logicalWidth - 4) * remaining / 100), laneHeight);
+        if (weekly)
+        {
+            // Separate lanes keep both percentages visible, including equal values.
+            graphics.FillRectangle(track, 1, 92, logicalWidth - 4, laneHeight);
+            var timeRemaining = window.TimeRemainingPercent(now);
+            if (timeRemaining is { } time) graphics.FillRectangle(weekTimer, 1, 92, (float)((logicalWidth - 4) * time / 100), laneHeight);
+            graphics.DrawString(window.Remaining is null ? "Quota unavailable" : $"Quota: {window.PercentText}", detailFont, accent,
+                new RectangleF(0, 106, 126, 20), ellipsis);
+            var timerText = timeRemaining is { } percent ? $"Week time: {Math.Floor(percent):0}% left" : "Week time unavailable";
+            graphics.DrawString(timerText, detailFont, weekTimer, new RectangleF(130, 106, logicalWidth - 130, 20), ellipsis);
+        }
+        graphics.DrawString(window.ResetText(now), detailFont, muted, new RectangleF(0, weekly ? 128 : 99, logicalWidth, 24), ellipsis);
     }
 }
 

@@ -18,6 +18,12 @@ internal static class Program
             foreach (var session in collectedCosts.RecentSessions) Console.WriteLine($"{session.DisplayName}: ${session.CostUSD:F2}");
             return 0;
         }
+        CheckWeekTime();
+        if (args.Contains("--week-time-check"))
+        {
+            Console.WriteLine($"PASS: {checks} focused weekly time checks");
+            return 0;
+        }
         var weekly = Parse("""{"rateLimits":{"primary":{"usedPercent":55,"windowDurationMins":10080,"resetsAt":1789852721},"secondary":null,"planType":"pro"}}""");
         Check(weekly.Windows.Count == 1 && weekly.Windows[0].WindowName == "Weekly" && weekly.Windows[0].Remaining == 45,
             "Weekly-only Pro account does not invent a five-hour window");
@@ -110,6 +116,40 @@ internal static class Program
     {
         using var document = JsonDocument.Parse(json);
         return UsageSnapshot.Parse(document.RootElement, Now);
+    }
+
+    private static void CheckWeekTime()
+    {
+        var halfWeek = new UsageWindow("codex", "Codex", "primary", 69, 10080, Now.AddDays(3.5));
+        Check(halfWeek.TimeRemainingPercent(Now) == 50 && halfWeek.WeekTimeText(Now) == "50% of week remaining",
+            "Weekly time percentage uses the reset time and duration");
+        var fractionalWeek = halfWeek with { ResetsAt = Now.AddDays(3.5).AddMinutes(1) };
+        Check(fractionalWeek.WeekTimeText(Now) == "50% of week remaining",
+            "Weekly time display conservatively rounds down fractional percentages");
+        var fullWeek = halfWeek with { ResetsAt = Now.AddDays(7) };
+        var overfullWeek = halfWeek with { ResetsAt = Now.AddDays(8) };
+        Check(fullWeek.TimeRemainingPercent(Now) == 100 && overfullWeek.TimeRemainingPercent(Now) == 100
+            && overfullWeek.WeekTimeText(Now) == "100% of week remaining",
+            "Full and overfull weekly reset times stay at 100 percent");
+        var pastReset = halfWeek with { ResetsAt = Now.AddMinutes(-1) };
+        Check(pastReset.TimeRemainingPercent(Now) == 0 && pastReset.WeekTimeText(Now) == "0% of week remaining"
+            && pastReset.Remaining == 31 && pastReset.PercentText == "31%",
+            "An expired timer reaches zero without changing remaining quota");
+        var exactReset = halfWeek with { ResetsAt = Now };
+        Check(exactReset.TimeRemainingPercent(Now) == 0,
+            "The timer reaches zero at the exact reset timestamp");
+        foreach (var (window, label) in new[]
+        {
+            (halfWeek with { DurationMinutes = null }, "Missing duration"),
+            (halfWeek with { DurationMinutes = 0 }, "Zero duration"),
+            (halfWeek with { DurationMinutes = -1 }, "Negative duration"),
+            (halfWeek with { ResetsAt = null }, "Missing reset")
+        })
+            Check(window.TimeRemainingPercent(Now) is null && window.WeekTimeText(Now) == "Week time unavailable",
+                label + " keeps weekly time unavailable");
+        var shortWindow = halfWeek with { DurationMinutes = 300, ResetsAt = Now.AddMinutes(150) };
+        Check(shortWindow.TimeRemainingPercent(Now) == 50 && shortWindow.WeekTimeText(Now) == "Week time unavailable",
+            "Generic timer math supports other windows without labelling them as weeks");
     }
 
     private static CostHistory ParseCosts(string json)

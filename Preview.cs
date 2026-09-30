@@ -11,6 +11,10 @@ internal static class Preview
         var samples = new Dictionary<string, UsageSnapshot>
         {
             ["weekly"] = new(now, "pro", [new("codex", "Codex", "primary", 55, 10080, now.AddHours(23))]),
+            ["weekly-time-greater"] = new(now, "pro", [new("codex", "Codex", "primary", 69, 10080, now.AddHours(84).AddSeconds(30))]),
+            ["weekly-quota-greater"] = new(now, "pro", [new("codex", "Codex", "primary", 20, 10080, now.AddHours(42).AddSeconds(30))]),
+            ["weekly-equal"] = new(now, "pro", [new("codex", "Codex", "primary", 50, 10080, now.AddHours(84).AddSeconds(30))]),
+            ["weekly-time-unavailable"] = new(now, "pro", [new("codex", "Codex", "primary", 69, 10080, null)]),
             ["two-windows"] = new(now, "plus", [new("codex", "Codex", "primary", 27, 300, now.AddHours(2)), new("codex", "Codex", "secondary", 81, 10080, now.AddDays(3))]),
             ["unavailable"] = new(now, null, [new("codex", "Codex", "primary", null, null, null)])
         };

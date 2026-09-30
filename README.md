@@ -25,6 +25,7 @@ Windows may initially put the icon under the tray's **^** overflow. Drag it besi
 
 - **Tray number:** lowest percentage remaining across reported windows.
 - **Left-click:** all percentages, reset countdowns, local reset dates, and the last successful update time.
+- **Weekly progress bar:** upper lane shows quota remaining; the gold lower lane shows the percentage of the week remaining until reset. Both lanes and their text labels stay visible regardless of which is higher. Time is calculated from the reported reset and window duration, and updates every minute while the panel is open.
 - **Right-click:** Show limits, Refresh now, Show cost history, Choose cost-history file, Start with Windows, or Quit.
 - **Refresh:** at launch, every 15 minutes, and after resuming Windows when an update is due.
 - **Amber `!`:** a check failed or data is stale. Retained figures are marked as last known.
