@@ -10,6 +10,14 @@ internal static class Program
     private static async Task<int> Main(string[] args)
     {
         if (args.Contains("app-server")) return await FakeServer();
+        if (args.Length == 2 && args[0] == "--cost-file")
+        {
+            using var document = JsonDocument.Parse(File.ReadAllText(args[1]));
+            var collectedCosts = CostHistory.Parse(document.RootElement);
+            Console.WriteLine($"Parsed Codex export: {collectedCosts.Daily.Count} dates, {collectedCosts.RecentSessions.Count} recent sessions.");
+            foreach (var session in collectedCosts.RecentSessions) Console.WriteLine($"{session.DisplayName}: ${session.CostUSD:F2}");
+            return 0;
+        }
         var weekly = Parse("""{"rateLimits":{"primary":{"usedPercent":55,"windowDurationMins":10080,"resetsAt":1789852721},"secondary":null,"planType":"pro"}}""");
         Check(weekly.Windows.Count == 1 && weekly.Windows[0].WindowName == "Weekly" && weekly.Windows[0].Remaining == 45,
             "Weekly-only Pro account does not invent a five-hour window");
@@ -29,6 +37,43 @@ internal static class Program
         Check(invalidReset.Windows[0].ResetsAt is null, "Invalid timestamp stays unavailable");
         var resetDue = weekly.Windows[0] with { ResetsAt = Now.AddMinutes(-1) };
         Check(resetDue.ResetText(Now).Contains("refresh to check") && resetDue.Remaining == 45, "Passing a reset date does not manufacture replenished quota");
+
+        const string costJson = """
+            {"schemaVersion":1,"provider":"codex","generatedAt":"2026-09-29T20:00:00.123Z","totalCost":26,
+             "daily":[{"date":"2026-08-15","totalCost":11,"totalTokens":100},
+                      {"date":"2026-09-27","totalCost":7,"totalTokens":200},
+                      {"date":"2026-09-28","totalCost":5,"totalTokens":300},
+                      {"date":"2026-09-29","totalCost":3,"totalTokens":400,"missingPricing":true}],
+             "recentSessions":[{"id":"a","displayName":"Old A","lastActivity":"2026-09-20T01:00:00Z","costUSD":1,"totalTokens":1},
+                               {"id":"b","displayName":"Second","lastActivity":"2026-09-28T01:00:00Z","costUSD":2,"totalTokens":2},
+                               {"id":"a","displayName":"Latest A","lastActivity":"2026-09-29T01:00:00Z","costUSD":3,"totalTokens":3},
+                               {"id":"c","displayName":"Third","lastActivity":"2026-09-27T01:00:00Z","costUSD":4,"totalTokens":4},
+                               {"id":"d","displayName":"Fourth","lastActivity":"2026-09-26T01:00:00Z","costUSD":5,"totalTokens":5},
+                               {"id":"e","displayName":"Fifth","lastActivity":"2026-09-25T01:00:00Z","costUSD":6,"totalTokens":6},
+                               {"id":"f","displayName":"Too old","lastActivity":"2026-09-24T01:00:00Z","costUSD":7,"totalTokens":7}]}
+            """;
+        var costs = ParseCosts(costJson);
+        var periods = costs.Periods(new DateOnly(2026, 9, 29));
+        Check(periods == new CostPeriods(3, 8, 15, 26), "Cost periods use local daily dates with a Monday week; session costs are never added twice");
+        Check(costs.RecentSessions.Count == 5 && costs.RecentSessions[0].DisplayName == "Latest A"
+            && costs.RecentSessions.Select(session => session.Id).SequenceEqual(new[] { "a", "b", "c", "d", "e" }),
+            "Five recent sessions are sorted by activity and deduplicated by ID using the latest record");
+        Check(costs.HasMissingPricing && !costs.IsStale(costs.GeneratedAt.AddDays(7)) && costs.IsStale(costs.GeneratedAt.AddDays(7).AddSeconds(1)),
+            "Missing pricing is visible and a cost file becomes stale only after seven days");
+        foreach (var (invalid, label) in new[]
+        {
+            (costJson.Replace("\"provider\":\"codex\"", "\"provider\":\"copilot\""), "Other providers cannot enter Codex cost history"),
+            (costJson.Replace("\"schemaVersion\":1", "\"schemaVersion\":2"), "Unknown cost schema is rejected"),
+            (costJson.Replace("\"schemaVersion\":1", "\"schemaVersion\":\"1\""), "Malformed schema is rejected without a JSON property exception"),
+            (costJson.Replace("\"totalCost\":11", "\"totalCost\":-1"), "Negative costs are rejected"),
+            (costJson.Replace("\"totalCost\":11", "\"totalCost\":1e400"), "Non-finite costs are rejected"),
+            (costJson.Replace("2026-08-15", "2026-09-29"), "Duplicate daily dates are rejected to prevent double counting"),
+            (costJson.Replace("2026-09-29T20:00:00.123Z", "2026-09-29T20:00:00.123"), "Cost freshness timestamps require an explicit timezone")
+        })
+        {
+            try { ParseCosts(invalid); throw new Exception("Expected invalid cost history"); }
+            catch (FormatException) { Check(true, label); }
+        }
 
         var priorPath = Environment.GetEnvironmentVariable("CODEX_METER_CODEX_PATH");
         var log = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "protocol-test.json"));
@@ -65,6 +110,12 @@ internal static class Program
     {
         using var document = JsonDocument.Parse(json);
         return UsageSnapshot.Parse(document.RootElement, Now);
+    }
+
+    private static CostHistory ParseCosts(string json)
+    {
+        using var document = JsonDocument.Parse(json);
+        return CostHistory.Parse(document.RootElement);
     }
 
     private static void Check(bool condition, string label)

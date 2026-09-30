@@ -26,6 +26,25 @@ internal static class Preview
             bitmap.Save(Path.Combine(directory, name + ".png"));
             popup.Hide();
         }
+        var today = DateOnly.FromDateTime(DateTime.Now);
+        var costs = new CostHistory(now,
+            [new(today, 3.27, 128700, false), new(today.AddDays(-1), 12.64, 408300, false), new(today.AddDays(-8), 7.83, 271800, false)],
+            [new("one", "Implement optional cost history", now, 3.27, 128700, false),
+             new("two", "Weekly usage collector", now.AddHours(-3), 12.64, 408300, false),
+             new("three", "Fix menu focus", now.AddHours(-6), 2.01, 77100, false),
+             new("four", "Research a very long session display name that should be clipped safely inside the hover panel", now.AddDays(-1), 4.89, 124800, false),
+             new("five", "Quick question", now.AddDays(-2), 0.08, 2900, false)]);
+        using (var hover = new CostHoverPopup())
+        {
+            _ = hover.Handle;
+            hover.UpdateHistory(costs, null, samples["two-windows"], false);
+            hover.Show();
+            Application.DoEvents();
+            using var bitmap = new Bitmap(hover.Width, hover.Height);
+            hover.DrawToBitmap(bitmap, new Rectangle(Point.Empty, bitmap.Size));
+            bitmap.Save(Path.Combine(directory, "cost-hover.png"));
+            hover.Hide();
+        }
         using var icon = TrayIcon.Draw(samples["weekly"], false, 32);
         icon.Save(Path.Combine(directory, "tray-icon.png"));
         using var sheet = new Bitmap(320, 200);

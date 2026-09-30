@@ -188,3 +188,135 @@ internal sealed class UsageCard : Control
         graphics.DrawString(window.ResetText(DateTimeOffset.UtcNow), detailFont, muted, new RectangleF(0, 99, logicalWidth, 24), ellipsis);
     }
 }
+
+internal sealed class CostHoverPopup : Form
+{
+    private CostHistory? history;
+    private string? error;
+    private string quota = "Click the tray icon for usage limits";
+    private readonly Font heading = new("Segoe UI", 14, FontStyle.Bold, GraphicsUnit.Pixel);
+    private readonly Font body = new("Segoe UI", 13, FontStyle.Regular, GraphicsUnit.Pixel);
+    private readonly Font money = new("Segoe UI", 22, FontStyle.Bold, GraphicsUnit.Pixel);
+    private readonly Font small = new("Segoe UI", 11, FontStyle.Regular, GraphicsUnit.Pixel);
+    private static readonly Color Muted = Color.FromArgb(164, 173, 188);
+
+    public CostHoverPopup()
+    {
+        Text = "Codex cost history";
+        AccessibleRole = AccessibleRole.ToolTip;
+        AutoScaleMode = AutoScaleMode.Dpi;
+        AutoScaleDimensions = new SizeF(96, 96);
+        FormBorderStyle = FormBorderStyle.None;
+        ShowInTaskbar = false;
+        TopMost = true;
+        StartPosition = FormStartPosition.Manual;
+        BackColor = Color.FromArgb(25, 28, 34);
+        ForeColor = Color.White;
+        ClientSize = new Size(440, 500);
+        DoubleBuffered = true;
+    }
+
+    protected override bool ShowWithoutActivation => true;
+    protected override CreateParams CreateParams
+    {
+        get
+        {
+            var parameters = base.CreateParams;
+            parameters.ExStyle |= 0x08000000 | 0x00000080; // WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW.
+            return parameters;
+        }
+    }
+
+    public void UpdateHistory(CostHistory? value, string? message, UsageSnapshot? snapshot, bool quotaStale)
+    {
+        history = value;
+        error = message;
+        quota = snapshot is { Windows.Count: > 0 }
+            ? (quotaStale ? "Last known · " : "") + string.Join(" · ", snapshot.Windows.Take(2).Select(window => $"{window.WindowName}: {window.PercentText} left"))
+            : "Click the tray icon for usage limits";
+        var scale = DeviceDpi / 96f;
+        ClientSize = new Size((int)(440 * scale), (int)((history is null ? 206 : 510) * scale));
+        AccessibleName = history is null ? $"Codex cost history. {error}. {quota}"
+            : "Codex API-equivalent USD estimates. " + quota + ". "
+              + string.Join(". ", history.RecentSessions.Select(session => $"{session.DisplayName}: {Usd(session.CostUSD)}"));
+        Invalidate();
+    }
+
+    public void ShowNearTray(Point anchor)
+    {
+        var area = Screen.FromPoint(anchor).WorkingArea;
+        Location = new Point(Math.Max(area.Left + 8, Math.Min(anchor.X - Width / 2, area.Right - Width - 8)),
+            Math.Max(area.Top + 8, area.Bottom - Height - 10));
+        Show();
+    }
+
+    protected override void WndProc(ref Message message)
+    {
+        if (message.Msg == 0x0021) { message.Result = (IntPtr)3; return; } // WM_MOUSEACTIVATE / MA_NOACTIVATE.
+        base.WndProc(ref message);
+    }
+
+    protected override void OnPaint(PaintEventArgs e)
+    {
+        base.OnPaint(e);
+        var graphics = e.Graphics;
+        graphics.ScaleTransform(DeviceDpi / 96f, DeviceDpi / 96f);
+        graphics.TextRenderingHint = System.Drawing.Text.TextRenderingHint.ClearTypeGridFit;
+        using var white = new SolidBrush(Color.FromArgb(235, 240, 248));
+        using var muted = new SolidBrush(Muted);
+        using var amber = new SolidBrush(TrayIcon.Amber);
+        using var track = new SolidBrush(Color.FromArgb(39, 45, 55));
+        using var line = new Pen(Color.FromArgb(55, 63, 76));
+        using var ellipsis = new StringFormat { Trimming = StringTrimming.EllipsisCharacter, FormatFlags = StringFormatFlags.NoWrap };
+        using var right = new StringFormat { Alignment = StringAlignment.Far, Trimming = StringTrimming.EllipsisCharacter, FormatFlags = StringFormatFlags.NoWrap };
+        graphics.DrawString("Codex · cost history", heading, white, 20, 17);
+        graphics.DrawString("API-equivalent USD estimates · not billed spending", small, muted, 20, 40);
+        graphics.DrawString(quota, body, muted, new RectangleF(20, 61, 400, 22), ellipsis);
+        graphics.DrawLine(line, 20, 89, 420, 89);
+        if (history is null)
+        {
+            graphics.DrawString(error ?? "No cost history is available.", body, amber, new RectangleF(20, 109, 395, 52));
+            graphics.DrawString("Choose cost-history file… in the tray menu", small, muted, 20, 176);
+            return;
+        }
+        var periods = history.Periods(DateOnly.FromDateTime(DateTime.Now));
+        var totals = new[] { ("Today", periods.Today), ("This week · Monday start", periods.Week), ("This month", periods.Month), ("All time in file", periods.AllTime) };
+        for (var index = 0; index < totals.Length; index++)
+        {
+            var x = 20 + index % 2 * 205;
+            var y = 101 + index / 2 * 65;
+            graphics.FillRectangle(track, x, y, 195, 58);
+            graphics.DrawString(totals[index].Item1, small, muted, x + 10, y + 6);
+            graphics.DrawString(Usd(totals[index].Item2), money, white, new RectangleF(x + 10, y + 24, 177, 31), ellipsis);
+        }
+        graphics.DrawString("5 most recent sessions", heading, white, 20, 240);
+        if (history.RecentSessions.Count == 0)
+            graphics.DrawString("No named sessions in the file", body, muted, 20, 273);
+        for (var index = 0; index < history.RecentSessions.Count; index++)
+        {
+            var session = history.RecentSessions[index];
+            var y = 271 + index * 37;
+            graphics.DrawString(session.DisplayName, body, white, new RectangleF(20, y, 294, 20), ellipsis);
+            graphics.DrawString(Usd(session.CostUSD) + (session.MissingPricing ? "*" : ""), body, white, new RectangleF(316, y, 104, 20), right);
+            graphics.DrawString(session.LastActivity.ToLocalTime().ToString("MMM d, h:mm tt"), small, muted, 20, y + 19);
+        }
+        var stale = history.IsStale(DateTimeOffset.UtcNow);
+        graphics.DrawLine(line, 20, 462, 420, 462);
+        var freshness = $"Collected {history.GeneratedAt.ToLocalTime():MMM d, yyyy h:mm tt}" + (stale ? " · stale (>7 days)" : "");
+        graphics.DrawString(freshness, small, stale ? amber : muted, new RectangleF(20, 471, 400, 17), ellipsis);
+        graphics.DrawString(history.HasMissingPricing ? "* Some pricing unavailable; estimates are incomplete" : "Daily totals use the collector’s local calendar dates", small,
+            history.HasMissingPricing ? amber : muted, new RectangleF(20, 491, 400, 16), ellipsis);
+    }
+
+    private static string Usd(double value) => "$" + value.ToString("N2", System.Globalization.CultureInfo.InvariantCulture);
+
+    protected override void Dispose(bool disposing)
+    {
+        base.Dispose(disposing);
+        if (!disposing) return;
+        heading.Dispose();
+        body.Dispose();
+        money.Dispose();
+        small.Dispose();
+    }
+}

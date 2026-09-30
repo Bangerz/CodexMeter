@@ -1,0 +1,23 @@
+{
+  "nodePath": "C:\\Program Files\\nodejs\\node.exe",
+  "pnpmPath": "C:\\Users\\YOUR-USER\\AppData\\Roaming\\npm\\pnpm.cmd",
+  "ccusageVersion": "20.0.26",
+  "codexHome": "C:\\Users\\YOUR-USER\\.codex",
+  "dataDirectory": "D:\\Tools\\UsageCollector\\data",
+  "dailyReportPath": "D:\\usage-report-all.json",
+  "sessionReportPath": "D:\\usage-report-session.json",
+  "sourceDirectories": {
+    "COPILOT_HOME": "C:\\Users\\YOUR-USER\\.copilot",
+    "ANTIGRAVITY_DATA_DIR": "C:\\Users\\YOUR-USER\\.gemini\\antigravity"
+  },
+  "cursorAgent": {
+    "enabled": false,
+    "dataDirectory": "C:\\Users\\YOUR-USER\\.cursor",
+    "moduleDirectory": "D:\\Tools\\UsageCollector\\vendor\\codeburn-0.9.25\\passive"
+  },
+  "antigravityNative": {
+    "enabled": false,
+    "conversationDirectories": ["C:\\Users\\YOUR-USER\\.gemini\\antigravity\\conversations"],
+    "moduleDirectory": "D:\\Tools\\UsageCollector\\vendor\\codeburn-0.9.25\\passive"
+  }
+}
