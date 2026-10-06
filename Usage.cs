@@ -2,6 +2,8 @@ using System.Text.Json;
 
 namespace CodexMeter;
 
+public enum UsagePace { Unknown, Ahead, OnTrack, Behind, FarBehind, Critical }
+
 public sealed record UsageWindow(string BucketId, string BucketName, string Slot,
     double? UsedPercent, int? DurationMinutes, DateTimeOffset? ResetsAt)
 {
@@ -11,6 +13,23 @@ public sealed record UsageWindow(string BucketId, string BucketName, string Slot
         ResetsAt is { } reset && DurationMinutes is > 0
             ? Math.Clamp((reset - now).TotalMinutes / DurationMinutes.Value * 100, 0, 100)
             : null;
+
+    public UsagePace PaceAt(DateTimeOffset now)
+    {
+        if (Remaining is not { } quota) return UsagePace.Unknown;
+        if (quota <= 0) return UsagePace.Critical;
+        if (ResetsAt is not { } reset || reset <= now || TimeRemainingPercent(now) is not { } time)
+            return UsagePace.Unknown;
+        var difference = quota - time;
+        return difference switch
+        {
+            > 5 => UsagePace.Ahead,
+            >= -5 => UsagePace.OnTrack,
+            >= -15 => UsagePace.Behind,
+            >= -30 => UsagePace.FarBehind,
+            _ => UsagePace.Critical
+        };
+    }
 
     public string WeekTimeText(DateTimeOffset now) =>
         DurationMinutes == 10080 && TimeRemainingPercent(now) is { } remaining

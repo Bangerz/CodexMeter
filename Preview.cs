@@ -72,5 +72,29 @@ internal static class Preview
             row++;
         }
         sheet.Save(Path.Combine(directory, "icon-sizes.png"));
+
+        using var paceSheet = new Bitmap(660, 150);
+        using var paceCanvas = Graphics.FromImage(paceSheet);
+        paceCanvas.Clear(Color.FromArgb(25, 28, 34));
+        paceCanvas.FillRectangle(Brushes.WhiteSmoke, 0, 75, 660, 75);
+        var index = 0;
+        foreach (var quota in new[] { 75, 50, 40, 25, 10, 0 })
+        {
+            var sample = new UsageSnapshot(now, "pro",
+                [new("codex", "Codex", "primary", 100 - quota, 10080, now.AddDays(3.5))]);
+            foreach (var light in new[] { false, true })
+            {
+                var y = light ? 75 : 0;
+                paceCanvas.DrawString(sample.MostLimited!.PaceAt(now).ToString(), caption,
+                    light ? Brushes.Black : Brushes.White, index * 110 + 3, y + 3);
+                using var tiny = TrayIcon.Draw(sample, false, 16, now, light);
+                using var large = TrayIcon.Draw(sample, false, 32, now, light);
+                paceCanvas.DrawImageUnscaled(tiny, index * 110 + 8, y + 35);
+                paceCanvas.DrawImageUnscaled(large, index * 110 + 40, y + 25);
+            }
+            index++;
+        }
+        paceSheet.Save(Path.Combine(directory, "pace-colors.png"));
+
     }
 }

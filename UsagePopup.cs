@@ -182,7 +182,7 @@ internal sealed class UsageCard : Control
         graphics.TextRenderingHint = System.Drawing.Text.TextRenderingHint.ClearTypeGridFit;
         var now = DateTimeOffset.UtcNow;
         UpdateAccessibleName(now);
-        var color = stale ? Color.FromArgb(164, 173, 188) : TrayIcon.ColorFor(window.Remaining, window.DurationMinutes);
+        var color = stale ? Color.FromArgb(164, 173, 188) : TrayIcon.ColorFor(window, DateTimeOffset.UtcNow);
         using var headingFont = new Font("Segoe UI", 13.33f, FontStyle.Regular, GraphicsUnit.Pixel);
         using var numberFont = new Font("Segoe UI", window.Remaining is null ? 28 : 40, FontStyle.Bold, GraphicsUnit.Pixel);
         using var detailFont = new Font("Segoe UI", 12, FontStyle.Regular, GraphicsUnit.Pixel);

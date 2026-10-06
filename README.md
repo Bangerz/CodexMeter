@@ -24,6 +24,7 @@ Windows may initially put the icon under the tray's **^** overflow. Drag it besi
 ## Use
 
 - **Tray number:** lowest percentage remaining across reported windows.
+- **Number color:** compares remaining quota with remaining time in the same window. Within ±5 percentage points is green; more than 5 points ahead is cyan. A deficit above 5 through 15 points is yellow, above 15 through 30 is orange, and above 30 is red. Empty quota is red. Missing or expired timing data is neutral gray. The tray color updates locally each minute without additional usage requests.
 - **Left-click:** all percentages, reset countdowns, local reset dates, and the last successful update time.
 - **Weekly progress bar:** upper lane shows quota remaining; the gold lower lane shows the percentage of the week remaining until reset. Both lanes and their text labels stay visible regardless of which is higher. Time is calculated from the reported reset and window duration, and updates every minute while the panel is open.
 - **Right-click:** Show limits, Refresh now, Show cost history, Choose cost-history file, Start with Windows, or Quit.

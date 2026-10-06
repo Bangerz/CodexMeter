@@ -18,6 +18,13 @@ internal static class Program
             foreach (var session in collectedCosts.RecentSessions) Console.WriteLine($"{session.DisplayName}: ${session.CostUSD:F2}");
             return 0;
         }
+        if (args.Contains("--pace-check"))
+        {
+            CheckPace();
+            Console.WriteLine($"PASS: {checks} focused pace checks");
+            return 0;
+        }
+        CheckPace();
         CheckWeekTime();
         if (args.Contains("--week-time-check"))
         {
@@ -116,6 +123,30 @@ internal static class Program
     {
         using var document = JsonDocument.Parse(json);
         return UsageSnapshot.Parse(document.RootElement, Now);
+    }
+
+    private static void CheckPace()
+    {
+        var sample = new UsageWindow("codex", "Codex", "primary", 50, 10080, Now.AddDays(3.5));
+        foreach (var (quota, expected) in new[]
+        {
+            (56.0, UsagePace.Ahead), (55.0, UsagePace.OnTrack),
+            (50.0, UsagePace.OnTrack), (45.0, UsagePace.OnTrack),
+            (44.9, UsagePace.Behind), (35.0, UsagePace.Behind),
+            (34.9, UsagePace.FarBehind), (20.0, UsagePace.FarBehind),
+            (19.9, UsagePace.Critical), (0.0, UsagePace.Critical)
+        })
+            Check((sample with { UsedPercent = 100 - quota }).PaceAt(Now) == expected,
+                $"Quota {quota}% against 50% time: {expected}");
+        Check(sample.PaceAt(Now.AddDays(1)) == UsagePace.Ahead, "Pace advances with time without new quota data");
+        Check((sample with { DurationMinutes = 300, ResetsAt = Now.AddMinutes(150) }).PaceAt(Now) == UsagePace.OnTrack,
+            "Short windows use their own duration");
+        Check((sample with { ResetsAt = null }).PaceAt(Now) == UsagePace.Unknown, "Unknown reset stays neutral");
+        Check((sample with { DurationMinutes = 0 }).PaceAt(Now) == UsagePace.Unknown, "Invalid duration stays neutral");
+        Check((sample with { UsedPercent = null }).PaceAt(Now) == UsagePace.Unknown, "Unknown quota stays neutral");
+        Check((sample with { ResetsAt = Now }).PaceAt(Now) == UsagePace.Unknown, "Expired quota is not shown as ahead");
+        Check((sample with { UsedPercent = 100, ResetsAt = Now.AddMinutes(1) }).PaceAt(Now) == UsagePace.Critical,
+            "Empty quota is red even near reset");
     }
 
     private static void CheckWeekTime()

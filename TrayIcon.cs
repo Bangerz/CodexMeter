@@ -11,10 +11,22 @@ internal static class TrayIcon
     public static readonly Color Green = Color.FromArgb(89, 205, 164);
     public static readonly Color Amber = Color.FromArgb(247, 183, 83);
     public static readonly Color Red = Color.FromArgb(247, 112, 116);
-    public static Color ColorFor(double? remaining, int? duration = null) => remaining switch
-    {
-        <= 10 => Red, <= 25 => Amber, _ => duration == 300 ? Green : Blue
-    };
+    public static Color ColorFor(UsageWindow? window, DateTimeOffset now, bool lightBackground = false) =>
+        (window?.PaceAt(now) ?? UsagePace.Unknown, lightBackground) switch
+        {
+            (UsagePace.Ahead, false) => Color.FromArgb(68, 220, 235),
+            (UsagePace.OnTrack, false) => Green,
+            (UsagePace.Behind, false) => Color.FromArgb(245, 215, 74),
+            (UsagePace.FarBehind, false) => Color.FromArgb(255, 153, 64),
+            (UsagePace.Critical, false) => Red,
+            (UsagePace.Ahead, true) => Color.FromArgb(0, 111, 126),
+            (UsagePace.OnTrack, true) => Color.FromArgb(0, 117, 66),
+            (UsagePace.Behind, true) => Color.FromArgb(135, 105, 0),
+            (UsagePace.FarBehind, true) => Color.FromArgb(173, 75, 0),
+            (UsagePace.Critical, true) => Color.FromArgb(189, 38, 48),
+            (_, true) => Color.FromArgb(65, 73, 85),
+            _ => Color.FromArgb(164, 173, 188)
+        };
 
     public static Icon Create(UsageSnapshot? snapshot, bool stale)
     {
@@ -24,7 +36,7 @@ internal static class TrayIcon
         finally { DestroyIcon(handle); }
     }
 
-    public static Bitmap Draw(UsageSnapshot? snapshot, bool stale, int size)
+    public static Bitmap Draw(UsageSnapshot? snapshot, bool stale, int size, DateTimeOffset? at = null, bool? lightBackground = null)
     {
         var bitmap = new Bitmap(size, size);
         using var graphics = Graphics.FromImage(bitmap);
@@ -35,7 +47,8 @@ internal static class TrayIcon
         var window = snapshot?.MostLimited;
         // A stale number must not masquerade as current usage.
         var label = stale ? "!" : window?.Remaining is { } remaining ? $"{Math.Floor(remaining):0}" : "–";
-        using var brush = new SolidBrush(stale ? Amber : IsLightTaskbar() ? Color.FromArgb(25, 31, 42) : Color.White);
+        var color = ColorFor(window, at ?? DateTimeOffset.UtcNow, lightBackground ?? IsLightTaskbar());
+        using var brush = new SolidBrush(stale ? Amber : color);
         // Fit the actual glyph outlines instead of relying on DrawString layout,
         // which can wrap or clip digits in a tiny DPI-scaled icon.
         using var family = new FontFamily("Segoe UI");
@@ -52,7 +65,7 @@ internal static class TrayIcon
         graphics.DrawLine(rail, 4, 30, 28, 30);
         if (!stale && window?.Remaining is { } left && left > 0)
         {
-            using var fill = new Pen(ColorFor(left, window.DurationMinutes), 3);
+            using var fill = new Pen(color, 3);
             graphics.DrawLine(fill, 4, 30, 4 + 24 * (float)(left / 100), 30);
         }
         return bitmap;

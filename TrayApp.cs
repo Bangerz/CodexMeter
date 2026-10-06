@@ -11,6 +11,7 @@ internal sealed class TrayApp : ApplicationContext
     private readonly CostHistorySettings costSettings = CostHistorySettings.Load();
     private readonly System.Windows.Forms.Timer hoverTimer = new() { Interval = 250 };
     private readonly System.Windows.Forms.Timer timer = new() { Interval = (int)PollInterval.TotalMilliseconds };
+    private readonly System.Windows.Forms.Timer colorTimer = new() { Interval = 60_000 };
     private readonly CancellationTokenSource lifetime = new();
     private readonly CodexClient client = new();
     private readonly ToolStripMenuItem refreshItem;
@@ -66,6 +67,8 @@ internal sealed class TrayApp : ApplicationContext
         };
         popup.RefreshRequested += async (_, _) => await RefreshAsync();
         timer.Tick += async (_, _) => await RefreshAsync();
+        colorTimer.Tick += (_, _) => UpdateTrayIcon();
+        colorTimer.Start();
         SystemEvents.PowerModeChanged += OnPowerModeChanged;
         SystemEvents.UserPreferenceChanged += OnPreferencesChanged;
         UpdateDisplay();
@@ -102,12 +105,17 @@ internal sealed class TrayApp : ApplicationContext
         }
     }
 
-    private void UpdateDisplay()
+    private void UpdateTrayIcon()
     {
         var replacement = TrayIcon.Create(snapshot, IsStale || error is not null);
         tray.Icon = replacement;
         currentIcon?.Dispose();
         currentIcon = replacement;
+    }
+
+    private void UpdateDisplay()
+    {
+        UpdateTrayIcon();
         var summaries = snapshot?.Windows.Select(w => $"{w.WindowName}: {w.PercentText} left").ToArray() ?? [];
         var title = error is not null || IsStale ? "Codex · Update needed" : "Codex · Remaining";
         var tooltip = title + (summaries.Length > 0 ? "\n" + string.Join("\n", summaries) : loading ? "\nChecking…" : "\nClick for details");
@@ -211,6 +219,8 @@ internal sealed class TrayApp : ApplicationContext
         lifetime.Cancel();
         timer.Stop();
         timer.Dispose();
+        colorTimer.Stop();
+        colorTimer.Dispose();
         hoverTimer.Stop();
         hoverTimer.Dispose();
         tray.Visible = false;
