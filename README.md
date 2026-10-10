@@ -2,7 +2,7 @@
 
 **Your Codex limits, beside the Windows clock.**
 
-A minimal native Windows 11 tray app. The icon shows your lowest percentage remaining; click it for all reported limits and reset times. Refreshes every **15 minutes**, with **no model calls or token consumption for polling**.
+A minimal native Windows 11 tray app. The icon shows your lowest percentage remaining; click it for all reported limits and reset times. Refreshes every **10 minutes**, with **no model calls or token consumption for polling**.
 
 [**Download for Windows**](https://github.com/Bangerz/CodexMeter/releases/latest) · [CC0 license](LICENSE)
 
@@ -28,11 +28,14 @@ Windows may initially put the icon under the tray's **^** overflow. Drag it besi
 - **Left-click:** all percentages, reset countdowns, local reset dates, and the last successful update time.
 - **Weekly progress bar:** upper lane shows quota remaining; the gold lower lane shows the percentage of the week remaining until reset. Both lanes and their text labels stay visible regardless of which is higher. Time is calculated from the reported reset and window duration, and updates every minute while the panel is open.
 - **Right-click:** Show limits, Refresh now, Show cost history, Choose cost-history file, Start with Windows, or Quit.
-- **Refresh:** at launch, every 15 minutes, and after resuming Windows when an update is due.
+- **Refresh:** at launch, every 10 minutes, and after resuming Windows when an update is due.
+- **Early reset notification:** a Windows tray notification appears when a successful check reports increased remaining quota more than one minute before that window's previously scheduled reset. Click it to open all limits. Multiple affected windows share one notification; normal scheduled resets and unchanged readings stay quiet. Windows notification settings apply.
 - **Amber `!`:** a check failed or data is stale. Retained figures are marked as last known.
 - **Start with Windows:** optional, off by default. Enable after choosing a permanent folder; disable before moving or deleting the app.
 
 Supports weekly-only accounts, five-hour plus weekly windows, and multiple usage buckets. Missing values stay unavailable. Passing a reset time does not manufacture replenished quota.
+
+Early resets are inferred from consecutive successful readings while the app is running, including after a failed check. The first reading after launch establishes a baseline. Plan or window-duration changes establish a new baseline too. A changed reset time alone does not trigger an alert. Polling cannot identify the cause of replenishment, distinguish a switch between accounts on the same plan, or detect a reset if usage has already caught up with the previous reading.
 
 <img src="docs/images/icon-sizes.png" width="320" alt="Percentages 4, 40, 44, and 100 at 16, 20, 24, and 32 pixels">
 
@@ -161,4 +164,4 @@ Diagnostics:
 
 Inspired by [CodexReserve](https://github.com/yourarnav/CodexReserve). This is an independent Windows implementation; no code or artwork was copied from that project.
 
-Unofficial and not affiliated with OpenAI. No notifications, sounds, automatic updates, or app-owned analytics.
+Unofficial and not affiliated with OpenAI. No automatic updates or app-owned analytics.

@@ -4,7 +4,7 @@ namespace CodexMeter;
 
 internal sealed class TrayApp : ApplicationContext
 {
-    internal static readonly TimeSpan PollInterval = TimeSpan.FromMinutes(15);
+    internal static readonly TimeSpan PollInterval = TimeSpan.FromMinutes(10);
     private readonly NotifyIcon tray;
     private readonly UsagePopup popup = new();
     private readonly CostHoverPopup costHover = new();
@@ -57,6 +57,7 @@ internal sealed class TrayApp : ApplicationContext
         tray.MouseClick += (_, e) => { HideCostHover(); if (e.Button == MouseButtons.Left) { if (popup.Visible) popup.Hide(); else ShowPopup(); } };
         tray.MouseMove += (_, _) => ShowCostHover();
         tray.MouseDown += (_, _) => HideCostHover();
+        tray.BalloonTipClicked += (_, _) => ShowPopup();
         menu.Opening += (_, _) => HideCostHover();
         hoverTimer.Tick += (_, _) =>
         {
@@ -84,9 +85,12 @@ internal sealed class TrayApp : ApplicationContext
         loading = true;
         timer.Stop();
         UpdateDisplay();
+        IReadOnlyList<UsageReset> earlyResets = [];
         try
         {
-            snapshot = await client.FetchAsync(lifetime.Token);
+            var updated = await client.FetchAsync(lifetime.Token);
+            earlyResets = UsageResetDetector.FindEarlyResets(snapshot, updated);
+            snapshot = updated;
             error = null;
         }
         catch (OperationCanceledException) when (exiting) { return; }
@@ -103,6 +107,9 @@ internal sealed class TrayApp : ApplicationContext
                 timer.Start();
             }
         }
+        if (!exiting && earlyResets.Count > 0)
+            tray.ShowBalloonTip(10_000, "Codex usage reset early",
+                UsageResetDetector.NotificationText(earlyResets), ToolTipIcon.Info);
     }
 
     private void UpdateTrayIcon()

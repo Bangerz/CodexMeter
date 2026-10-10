@@ -18,6 +18,12 @@ internal static class Program
             foreach (var session in collectedCosts.RecentSessions) Console.WriteLine($"{session.DisplayName}: ${session.CostUSD:F2}");
             return 0;
         }
+        if (args.Contains("--reset-check"))
+        {
+            CheckEarlyResets();
+            Console.WriteLine($"PASS: {checks} focused early reset checks");
+            return 0;
+        }
         if (args.Contains("--pace-check"))
         {
             CheckPace();
@@ -31,6 +37,7 @@ internal static class Program
             Console.WriteLine($"PASS: {checks} focused weekly time checks");
             return 0;
         }
+        CheckEarlyResets();
         var weekly = Parse("""{"rateLimits":{"primary":{"usedPercent":55,"windowDurationMins":10080,"resetsAt":1789852721},"secondary":null,"planType":"pro"}}""");
         Check(weekly.Windows.Count == 1 && weekly.Windows[0].WindowName == "Weekly" && weekly.Windows[0].Remaining == 45,
             "Weekly-only Pro account does not invent a five-hour window");
@@ -123,6 +130,72 @@ internal static class Program
     {
         using var document = JsonDocument.Parse(json);
         return UsageSnapshot.Parse(document.RootElement, Now);
+    }
+
+    private static void CheckEarlyResets()
+    {
+        var weekly = new UsageWindow("codex", "Codex", "primary", 70, 10080, Now.AddDays(3));
+        UsageSnapshot Sample(DateTimeOffset at, params UsageWindow[] windows) => new(at, "pro", windows);
+        var before = Sample(Now, weekly);
+        var reset = weekly with { UsedPercent = 0 };
+        var after = Sample(Now.AddMinutes(10), reset);
+        IReadOnlyList<UsageReset> Detect(UsageSnapshot? prior, UsageSnapshot next) => UsageResetDetector.FindEarlyResets(prior, next);
+
+        Check(Detect(null, after).Count == 0, "First fetch establishes a baseline without notifying");
+        Check(Detect(before, after) is [{ Previous: var oldWindow, Current: var newWindow }]
+            && oldWindow == weekly && newWindow == reset, "Early reset to zero is detected even with an unchanged deadline");
+        Check(Detect(before, Sample(after.FetchedAt, reset with { UsedPercent = 12, ResetsAt = Now.AddDays(7) })).Count == 1,
+            "Early replenishment is detected after usage resumes, using the previous deadline");
+        Check(Detect(before, Sample(after.FetchedAt, reset with { UsedPercent = 69.9 })).Count == 1,
+            "Fractional replenishment is preserved");
+        Check(Detect(after, Sample(after.FetchedAt.AddMinutes(10), reset)).Count == 0,
+            "Repeated successful readings do not duplicate notifications");
+        var usedAgain = Sample(Now.AddMinutes(20), weekly with { UsedPercent = 20 });
+        Check(Detect(usedAgain, Sample(Now.AddMinutes(30), reset)).Count == 1,
+            "A later distinct early reset can notify again with the same deadline");
+        foreach (var used in new[] { 70.0, 75.0 })
+            Check(Detect(before, Sample(after.FetchedAt, weekly with { UsedPercent = used, ResetsAt = Now.AddDays(7) })).Count == 0,
+                "A schedule change without replenishment does not notify");
+        foreach (var at in new[] { weekly.ResetsAt!.Value, weekly.ResetsAt.Value.AddMinutes(10), weekly.ResetsAt.Value.AddDays(1) })
+            Check(Detect(before, Sample(at, reset with { ResetsAt = at.AddDays(7) })).Count == 0,
+                "Scheduled rollover or sleep crossing the old deadline stays quiet");
+        Check(Detect(before, Sample(weekly.ResetsAt!.Value.AddMinutes(-1), reset)).Count == 0
+            && Detect(before, Sample(weekly.ResetsAt.Value.AddMinutes(-1).AddSeconds(-1), reset)).Count == 1,
+            "A one-minute clock tolerance suppresses borderline scheduled rollovers");
+        Check(Detect(before, Sample(Now.AddHours(2), reset)).Count == 1,
+            "A successful check after a polling gap can detect replenishment before the old deadline");
+        Check(Detect(before, after with { Plan = "plus" }).Count == 0,
+            "Changing plans establishes a new baseline");
+        foreach (var window in new[]
+        {
+            reset with { BucketId = "other" }, reset with { Slot = "secondary" },
+            reset with { DurationMinutes = 300 }, reset with { DurationMinutes = null }
+        })
+            Check(Detect(before, Sample(after.FetchedAt, window)).Count == 0,
+                "Different buckets, slots, or durations do not compare unrelated counters");
+        foreach (var used in new double?[] { null, double.NaN, double.PositiveInfinity, double.NegativeInfinity, -1, 101 })
+            Check(Detect(before, Sample(after.FetchedAt, reset with { UsedPercent = used })).Count == 0
+                && Detect(Sample(Now, weekly with { UsedPercent = used }), after).Count == 0,
+                "Missing or invalid usage on either side cannot trigger a reset");
+        Check(Detect(Sample(Now, weekly with { ResetsAt = null }), after).Count == 0,
+            "An unknown previous deadline cannot establish an early reset");
+        Check(Detect(before, Sample(Now, reset)).Count == 0 && Detect(before, Sample(Now.AddMinutes(-1), reset)).Count == 0,
+            "Duplicate or backward observation times do not notify");
+        var secondary = weekly with { Slot = "secondary", DurationMinutes = 300, ResetsAt = Now.AddHours(3) };
+        var other = weekly with { BucketId = "other", BucketName = "Other" };
+        var combined = Detect(Sample(Now, weekly, secondary, other),
+            Sample(after.FetchedAt, other with { UsedPercent = 5 }, reset, secondary with { UsedPercent = 10 }));
+        Check(combined.Count == 3 && combined[0].Previous == other && combined[2].Previous == secondary,
+            "Multiple buckets and slots are matched by identity regardless of order");
+        var message = UsageResetDetector.NotificationText(Detect(before, after));
+        Check(message.Contains("Codex Weekly") && message.Contains("30% → 100%") && message.Contains("Was due"),
+            "Notification identifies replenished quota and the previous reset schedule");
+        Check(UsageResetDetector.NotificationText(combined).Contains("Other Weekly"),
+            "Affected windows share a notification body");
+        var longName = reset with { BucketName = new string('x', 300) };
+        var longMessage = UsageResetDetector.NotificationText([new(weekly, longName)]);
+        Check(longMessage.Length == 255 && longMessage.EndsWith("…"),
+            "Long notification text fits the Windows limit");
     }
 
     private static void CheckPace()
