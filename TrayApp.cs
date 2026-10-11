@@ -17,6 +17,7 @@ internal sealed class TrayApp : ApplicationContext
     private readonly CodexClient client = new();
     private readonly UsageDiagnostics diagnostics = new(Path.Combine(AppContext.BaseDirectory, "data", "notifications.jsonl"));
     private readonly DesktopNotifications notifications;
+    private readonly PromptAutomation automation;
     private readonly EventWaitHandle showEvent = new(false, EventResetMode.AutoReset, ShowEventName);
     private readonly RegisteredWaitHandle showWait;
     private readonly ToolStripMenuItem refreshItem;
@@ -38,6 +39,8 @@ internal sealed class TrayApp : ApplicationContext
     {
         notifications = new(diagnostics);
         notifications.RegisterSender();
+        automation = new(new PromptRuleStore(Path.Combine(AppContext.BaseDirectory, "data", "prompt-rules.json")), new CodexPromptRunner().RunAsync);
+        automation.Notice += (title, text) => { if (!exiting) ShowNotification("prompt", title, text); };
         // Ensure a UI handle exists for resume/theme events arriving on background threads.
         _ = popup.Handle;
         showWait = ThreadPool.RegisterWaitForSingleObject(showEvent, (_, _) =>
@@ -50,6 +53,7 @@ internal sealed class TrayApp : ApplicationContext
         refreshItem = new ToolStripMenuItem("Refresh now", null, async (_, _) => await RefreshAsync());
         menu.Items.Add(refreshItem);
         menu.Items.Add("Test notification", null, (_, _) => ShowTestNotification());
+        menu.Items.Add("Prompt rules…", null, (_, _) => ShowPromptRules());
         menu.Items.Add(new ToolStripSeparator());
         costItem = new ToolStripMenuItem("Show cost history") { Checked = costSettings.Enabled };
         costItem.Click += (_, _) => ChangeCostSettings(!costSettings.Enabled, costSettings.Path);
@@ -133,6 +137,16 @@ internal sealed class TrayApp : ApplicationContext
         }
         if (!exiting && earlyResets.Count > 0)
             ShowNotification("early_reset", "Codex usage reset early", UsageResetDetector.NotificationText(earlyResets));
+        if (!exiting && error is null && snapshot is not null) automation.Observe(snapshot);
+        else if (!exiting) automation.PollFailed();
+    }
+
+    private void ShowPromptRules()
+    {
+        HideCostHover();
+        popup.Hide();
+        using var editor = new PromptRulesForm(automation);
+        editor.ShowDialog();
     }
 
     private void ShowTestNotification() => ShowNotification("test", "Codex Meter test notification",
@@ -253,6 +267,7 @@ internal sealed class TrayApp : ApplicationContext
     {
         if (exiting) return;
         exiting = true;
+        automation.CancelRuns(shutdown: true);
         diagnostics.Write("stopped");
         notifications.Dispose();
         showWait.Unregister(null);

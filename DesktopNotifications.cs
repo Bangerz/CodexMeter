@@ -67,7 +67,7 @@ public sealed class DesktopNotifications(UsageDiagnostics diagnostics) : IDispos
             xml.LoadXml(Content(title, text));
             var toast = new ToastNotification(xml)
             {
-                Tag = kind == "test" ? "test" : "reset", Group = "usage",
+                Tag = kind == "test" ? "test" : kind == "prompt" ? "prompt" : "reset", Group = "usage",
                 ExpirationTime = DateTimeOffset.UtcNow.AddDays(1)
             };
             toast.Failed += (_, args) => diagnostics.Write("toast_failed", new { Type = kind, HResult = args.ErrorCode.HResult });

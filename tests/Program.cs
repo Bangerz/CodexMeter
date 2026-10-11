@@ -10,6 +10,8 @@ internal static class Program
     private static async Task<int> Main(string[] args)
     {
         if (args.Contains("app-server")) return await FakeServer();
+        if (args.Contains("exec")) return await PromptChecks.FakeCodex(args);
+        if (args.Contains("--prompt-check")) return await PromptChecks.Run();
         if (args.Length == 2 && args[0] == "--cost-file")
         {
             using var document = JsonDocument.Parse(File.ReadAllText(args[1]));

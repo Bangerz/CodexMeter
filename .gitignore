@@ -4,3 +4,4 @@ artifacts/
 .tools/
 *.user
 data/notifications.jsonl*
+data/prompt-rules.json*

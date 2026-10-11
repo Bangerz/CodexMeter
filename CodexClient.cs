@@ -108,7 +108,7 @@ public sealed class CodexClient
         catch (ObjectDisposedException) { }
     }
 
-    private static ProcessStartInfo CreateStartInfo()
+    public static string FindExecutable()
     {
         var explicitPath = Environment.GetEnvironmentVariable("CODEX_METER_CODEX_PATH");
         string? binary = null;
@@ -162,7 +162,12 @@ public sealed class CodexClient
             }
         }
         if (binary is null) throw new UsageException("Open the Codex desktop app, then click Refresh.");
-        var info = new ProcessStartInfo(binary)
+        return binary;
+    }
+
+    private static ProcessStartInfo CreateStartInfo()
+    {
+        var info = new ProcessStartInfo(FindExecutable())
         {
             UseShellExecute = false, CreateNoWindow = true,
             RedirectStandardInput = true, RedirectStandardOutput = true, RedirectStandardError = true,

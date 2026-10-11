@@ -27,6 +27,11 @@ internal static class Program
             Preview.Save(args[1]);
             return 0;
         }
+        if (args.Length == 2 && args[0] == "--preview-prompt-rules")
+        {
+            Preview.SavePromptRules(args[1]);
+            return 0;
+        }
         if (args.Length == 2 && args[0] == "--notification-status")
         {
             try

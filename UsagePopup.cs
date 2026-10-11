@@ -95,9 +95,9 @@ internal sealed class UsagePopup : Form
         status.ForeColor = error is null && !stale ? Muted : TrayIcon.Amber;
         status.Text = loading ? "Refreshing…" : error is not null
             ? (snapshot is null ? error : $"Last known · {time}. Refresh failed.\n{error}")
-            : snapshot is null ? "Every 15 min"
+            : snapshot is null ? "Every 10 min"
             : stale ? $"Last known · {time} · update overdue"
-            : $"Updated {time} · Every 15 min";
+            : $"Updated {time} · Every 10 min";
         tips.SetToolTip(status, status.Text);
         refresh.Enabled = !loading;
         ClientSize = new Size((int)(344 * scale), (int)(Math.Min(580, 140 + contentHeight) * scale));

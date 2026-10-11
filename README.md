@@ -27,7 +27,7 @@ Windows may initially put the icon under the tray's **^** overflow. Drag it besi
 - **Number color:** compares remaining quota with remaining time in the same window. Within ±5 percentage points is green; more than 5 points ahead is cyan. A deficit above 5 through 15 points is yellow, above 15 through 30 is orange, and above 30 is red. Empty quota is red. Missing or expired timing data is neutral gray. The tray color updates locally each minute without additional usage requests.
 - **Left-click:** all percentages, reset countdowns, local reset dates, and the last successful update time.
 - **Weekly progress bar:** upper lane shows quota remaining; the gold lower lane shows the percentage of the week remaining until reset. Both lanes and their text labels stay visible regardless of which is higher. Time is calculated from the reported reset and window duration, and updates every minute while the panel is open.
-- **Right-click:** Show limits, Refresh now, Test notification, Show cost history, Choose cost-history file, Start with Windows, or Quit.
+- **Right-click:** Show limits, Refresh now, Test notification, Prompt rules, Show cost history, Choose cost-history file, Start with Windows, or Quit.
 - **Refresh:** at launch, every 10 minutes, and after resuming Windows when an update is due.
 - **Early reset notification:** a Windows toast from **Codex Meter** appears when a successful check reports increased remaining quota more than one minute before that window's previously scheduled reset. Click it to open all limits. Multiple affected windows share one notification; normal scheduled resets and unchanged readings stay quiet. The latest reset notification remains in Notification Center for up to 24 hours unless dismissed or replaced. Windows notification settings apply.
 - **Amber `!`:** a check failed or data is stale. Retained figures are marked as last known.
@@ -47,9 +47,25 @@ Each poll starts a hidden `codex app-server --listen stdio://`, sends only:
 2. `initialized`
 3. `account/rateLimits/read`
 
-Then it closes its private helper. No thread or model turn is started. It never redeems resets, purchases credits, or calls an inference API.
+Then it closes its private helper. Polling starts no thread or model turn. It never redeems resets or purchases credits. Optional prompt rules below start separate Codex runs and consume quota.
 
 Codex manages its existing authentication and any required token refresh. Codex Meter does not itself read or save OAuth credentials or raw server logs. When the optional cost integration is enabled, it reads only a compact local Codex cost export. Startup is stored in the current user's Windows Run registry key; cost preferences are stored under `HKCU\Software\CodexMeter`.
+
+## Optional threshold prompts
+
+Right-click **Prompt rules…** to add or edit up to 32 rules. Each has a name, enable checkbox, remaining-quota source (lowest across all windows, Codex weekly, or Codex 5-hour), direction, percentage, prompt, working folder, permissions, and timeout. The 80% resume and 20% pause examples start **disabled**. Save your changes to apply them. Settings and the latest response for each rule are stored locally in `data/prompt-rules.json` beside the executable; keep this file private.
+
+- **Rises to or above 80%:** triggers on an observed move from below 80% to at least 80%. It rearms only below 80%.
+- **Falls to or below 20%:** triggers on an observed move from above 20% to at most 20%. It rearms only above 20%.
+- Equality stays on the trigger side. Remaining at the threshold or farther beyond it does not rerun the prompt.
+- First readings and edited/enabled rules establish a baseline without executing. Existing rules retain their state across Meter restarts and can detect a crossing between the last saved reading and the next successful one. A changed plan or set of quota windows establishes a new baseline. Missing or invalid quota never becomes zero or full quota.
+- Checks happen on successful polls, including manual Refresh. Changes between polls can go undetected. The 20% reserve is approximate, not a hard cap; usage and a running prompt can continue before the next check.
+
+Meter invokes [`codex exec`](https://learn.chatgpt.com/docs/non-interactive-mode) with the prompt on standard input, the chosen working folder, and your existing Codex login, model, and configuration. **Read-only** is the default; **Allow edits in working folder** selects `workspace-write`. Unattended runs cannot ask for additional approval. Meter does not pass any sandbox-bypass flag. This is a separate CLI session, not an injection into an open desktop chat or a run of a desktop scheduled task. Desktop app-only tools are not supplied to it. The example goal-management prompts need supported session/goal controls available in the execution environment; Meter does not itself pause or resume other goals, and the examples report unavailable controls instead of editing session databases.
+
+Only one prompt helper runs at a time. Meter uses `--no-daemon` so it owns the helper it can cancel (requires a current Codex CLI). Before a queued prompt starts, Meter rechecks that its rule remains enabled and unchanged and that fresh quota still matches. Changed or stale conditions skip the queued attempt. **Cancel runs** stops Meter's current helper and clears its queue; it does not undo actions already taken. Disabling/editing a rule prevents queued work but does not cancel an already running helper. Quitting Meter cancels its helper.
+
+The crossing is saved before starting Codex, preventing automatic duplicate dispatch after a crash. Failed, timed-out, cancelled, skipped, or interrupted attempts are **not retried automatically**; a new opposite-side crossing is required to rearm. If state cannot be saved, prompt execution stops while quota polling continues. Fix the storage issue and save Prompt rules to recover. Completed helper execution is shown as **Finished**, not proof that every requested action succeeded: inspect the final response. The editor shows the latest attempt and up to 16,000 response characters. Meter drains but does not store CLI progress/error output. Codex keeps its normal session history.
 
 ## Optional cost history on hover
 
@@ -165,6 +181,8 @@ Diagnostics:
 
 - `CodexMeter.exe --check <output.json>` performs one real usage check and writes normalized quota data. Keep that output private.
 - `CodexMeter.exe --preview <directory>` renders synthetic UI samples and small-icon comparisons.
+- `CodexMeter.exe --preview-prompt-rules <directory>` renders the rule editor without executing prompts.
+- `dotnet run --project tests/CodexMeter.Tests.csproj -c Release -- --prompt-check` checks threshold state, persistence, queue behavior, and process handling using a fake Codex executable without model calls.
 - After quitting the running app, `CodexMeter.exe --test-notification` launches normally and sends one labeled test notification after the initial check.
 - `CodexMeter.exe --notification-status <output.json>` reads only Codex Meter's notification setting and retained notification-history API entries. These do not establish UI visibility. Keep that quota-bearing diagnostic output private.
 

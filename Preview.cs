@@ -4,6 +4,21 @@ namespace CodexMeter;
 
 internal static class Preview
 {
+    public static void SavePromptRules(string directory)
+    {
+        Directory.CreateDirectory(directory);
+        var automation = new PromptAutomation(new PromptRuleStore(Path.Combine(directory, "preview-settings.json")),
+            (_, _) => Task.FromResult(new PromptRunResult("Preview", "No prompt was run.")));
+        using var form = new PromptRulesForm(automation);
+        form.Show();
+        Application.DoEvents();
+        form.CheckPreviewSelections();
+        using var bitmap = new Bitmap(form.Width, form.Height);
+        form.DrawToBitmap(bitmap, new Rectangle(Point.Empty, bitmap.Size));
+        bitmap.Save(Path.Combine(directory, "prompt-rules.png"));
+        form.Hide();
+    }
+
     public static void Save(string directory)
     {
         Directory.CreateDirectory(directory);
