@@ -21,6 +21,7 @@ internal static class Program
         if (args.Contains("--reset-check"))
         {
             CheckEarlyResets();
+            CheckUsageDiagnostics();
             Console.WriteLine($"PASS: {checks} focused early reset checks");
             return 0;
         }
@@ -38,6 +39,7 @@ internal static class Program
             return 0;
         }
         CheckEarlyResets();
+        CheckUsageDiagnostics();
         var weekly = Parse("""{"rateLimits":{"primary":{"usedPercent":55,"windowDurationMins":10080,"resetsAt":1789852721},"secondary":null,"planType":"pro"}}""");
         Check(weekly.Windows.Count == 1 && weekly.Windows[0].WindowName == "Weekly" && weekly.Windows[0].Remaining == 45,
             "Weekly-only Pro account does not invent a five-hour window");
@@ -166,6 +168,19 @@ internal static class Program
             "A successful check after a polling gap can detect replenishment before the old deadline");
         Check(Detect(before, after with { Plan = "plus" }).Count == 0,
             "Changing plans establishes a new baseline");
+        foreach (var plan in new string?[] { null, "", " " })
+        {
+            Check(Detect(before, after with { Plan = plan }).Count == 1,
+                "A temporarily missing current plan does not swallow an early reset");
+            Check(Detect(before with { Plan = plan }, after).Count == 1,
+                "A newly reported plan does not hide replenishment after missing metadata");
+        }
+        Check(Detect(before, after with { Plan = "PRO" }).Count == 1,
+            "Plan capitalization does not manufacture a plan change");
+        var beforeReportedReset = before with { Windows = [weekly with { UsedPercent = 80 }] };
+        var afterReportedReset = after with { Plan = null, Windows = [reset with { ResetsAt = weekly.ResetsAt!.Value.AddHours(5) }] };
+        Check(Detect(beforeReportedReset, afterReportedReset).Count == 1,
+            "Reported 80-to-zero usage reset with missing plan and shifted deadline is detected");
         foreach (var window in new[]
         {
             reset with { BucketId = "other" }, reset with { Slot = "secondary" },
@@ -196,6 +211,30 @@ internal static class Program
         var longMessage = UsageResetDetector.NotificationText([new(weekly, longName)]);
         Check(longMessage.Length == 255 && longMessage.EndsWith("…"),
             "Long notification text fits the Windows limit");
+    }
+
+    private static void CheckUsageDiagnostics()
+    {
+        var path = Path.Combine(AppContext.BaseDirectory, "notification-test-" + Guid.NewGuid().ToString("N") + ".jsonl");
+        try
+        {
+            var diagnostics = new UsageDiagnostics(path);
+            Check(diagnostics.Write("notification_requested", new { Type = "test" }), "Notification requests are recorded locally");
+            using (var entry = JsonDocument.Parse(File.ReadAllText(path)))
+                Check(entry.RootElement.GetProperty("Kind").GetString() == "notification_requested"
+                    && entry.RootElement.GetProperty("Detail").GetProperty("Type").GetString() == "test",
+                    "Diagnostic events distinguish tests from actual reset notifications");
+            File.WriteAllText(path, new string('x', 256 * 1024));
+            Check(diagnostics.Write("shell_balloon_shown") && File.Exists(path + ".previous")
+                && new FileInfo(path).Length < 1024, "Diagnostics rotate instead of growing without a bound");
+            Check(!new UsageDiagnostics(AppContext.BaseDirectory).Write("test"),
+                "Unavailable diagnostic storage does not throw into polling or notification delivery");
+        }
+        finally
+        {
+            File.Delete(path);
+            File.Delete(path + ".previous");
+        }
     }
 
     private static void CheckPace()

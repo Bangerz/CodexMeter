@@ -14,6 +14,7 @@ internal sealed class TrayApp : ApplicationContext
     private readonly System.Windows.Forms.Timer colorTimer = new() { Interval = 60_000 };
     private readonly CancellationTokenSource lifetime = new();
     private readonly CodexClient client = new();
+    private readonly UsageDiagnostics diagnostics = new(Path.Combine(AppContext.BaseDirectory, "data", "notifications.jsonl"));
     private readonly ToolStripMenuItem refreshItem;
     private readonly ToolStripMenuItem costItem;
     private readonly EventHandler idleHandler;
@@ -29,7 +30,7 @@ internal sealed class TrayApp : ApplicationContext
     private DateTimeOffset hoverShownAt;
     private bool IsStale => snapshot is not null && (error is not null || DateTimeOffset.UtcNow - snapshot.FetchedAt > PollInterval + TimeSpan.FromMinutes(1));
 
-    public TrayApp()
+    public TrayApp(bool testNotification = false)
     {
         // Ensure a UI handle exists for resume/theme events arriving on background threads.
         _ = popup.Handle;
@@ -37,6 +38,7 @@ internal sealed class TrayApp : ApplicationContext
         menu.Items.Add("Show limits", null, (_, _) => ShowPopup());
         refreshItem = new ToolStripMenuItem("Refresh now", null, async (_, _) => await RefreshAsync());
         menu.Items.Add(refreshItem);
+        menu.Items.Add("Test notification", null, (_, _) => ShowTestNotification());
         menu.Items.Add(new ToolStripSeparator());
         costItem = new ToolStripMenuItem("Show cost history") { Checked = costSettings.Enabled };
         costItem.Click += (_, _) => ChangeCostSettings(!costSettings.Enabled, costSettings.Path);
@@ -57,7 +59,9 @@ internal sealed class TrayApp : ApplicationContext
         tray.MouseClick += (_, e) => { HideCostHover(); if (e.Button == MouseButtons.Left) { if (popup.Visible) popup.Hide(); else ShowPopup(); } };
         tray.MouseMove += (_, _) => ShowCostHover();
         tray.MouseDown += (_, _) => HideCostHover();
-        tray.BalloonTipClicked += (_, _) => ShowPopup();
+        tray.BalloonTipShown += (_, _) => diagnostics.Write("shell_balloon_shown");
+        tray.BalloonTipClosed += (_, _) => diagnostics.Write("shell_balloon_closed");
+        tray.BalloonTipClicked += (_, _) => { diagnostics.Write("shell_balloon_clicked"); ShowPopup(); };
         menu.Opening += (_, _) => HideCostHover();
         hoverTimer.Tick += (_, _) =>
         {
@@ -75,7 +79,13 @@ internal sealed class TrayApp : ApplicationContext
         UpdateDisplay();
         tray.Visible = true;
         nextPoll = DateTimeOffset.UtcNow;
-        idleHandler = async (_, _) => { Application.Idle -= idleHandler; await RefreshAsync(); };
+        diagnostics.Write("started", new { PollMinutes = PollInterval.TotalMinutes });
+        idleHandler = async (_, _) =>
+        {
+            Application.Idle -= idleHandler;
+            await RefreshAsync();
+            if (testNotification && !exiting) ShowTestNotification();
+        };
         Application.Idle += idleHandler;
     }
 
@@ -89,7 +99,11 @@ internal sealed class TrayApp : ApplicationContext
         try
         {
             var updated = await client.FetchAsync(lifetime.Token);
+            var reportedPlan = updated.Plan;
+            // Keep the last reported plan through temporary metadata omissions.
+            if (string.IsNullOrWhiteSpace(updated.Plan)) updated = updated with { Plan = snapshot?.Plan };
             earlyResets = UsageResetDetector.FindEarlyResets(snapshot, updated);
+            diagnostics.Write("poll_succeeded", new { Previous = snapshot, Current = updated, ReportedPlan = reportedPlan, EarlyResetCount = earlyResets.Count });
             snapshot = updated;
             error = null;
         }
@@ -101,6 +115,7 @@ internal sealed class TrayApp : ApplicationContext
             loading = false;
             if (!exiting)
             {
+                if (error is not null) diagnostics.Write("poll_failed", new { Error = error });
                 nextPoll = DateTimeOffset.UtcNow + PollInterval;
                 ReadCostHistory();
                 UpdateDisplay();
@@ -108,8 +123,16 @@ internal sealed class TrayApp : ApplicationContext
             }
         }
         if (!exiting && earlyResets.Count > 0)
-            tray.ShowBalloonTip(10_000, "Codex usage reset early",
-                UsageResetDetector.NotificationText(earlyResets), ToolTipIcon.Info);
+            ShowNotification("early_reset", "Codex usage reset early", UsageResetDetector.NotificationText(earlyResets));
+    }
+
+    private void ShowTestNotification() => ShowNotification("test", "Codex Meter test notification",
+        "Notification test only — your quota has not changed. Early reset alerts use this same notification path.");
+
+    private void ShowNotification(string kind, string title, string text)
+    {
+        diagnostics.Write("notification_requested", new { Type = kind, Title = title, Text = text });
+        tray.ShowBalloonTip(10_000, title, text, ToolTipIcon.Info);
     }
 
     private void UpdateTrayIcon()
@@ -220,6 +243,7 @@ internal sealed class TrayApp : ApplicationContext
     {
         if (exiting) return;
         exiting = true;
+        diagnostics.Write("stopped");
         Application.Idle -= idleHandler;
         SystemEvents.PowerModeChanged -= OnPowerModeChanged;
         SystemEvents.UserPreferenceChanged -= OnPreferencesChanged;

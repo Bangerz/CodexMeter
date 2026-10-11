@@ -29,7 +29,7 @@ internal static class Program
         }
         using var singleton = new Mutex(true, @"Local\CodexMeter.Tray.v1", out var created);
         if (!created) return 0;
-        Application.Run(new TrayApp());
+        Application.Run(new TrayApp(args.Contains("--test-notification")));
         return 0;
     }
 }

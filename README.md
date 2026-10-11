@@ -27,7 +27,7 @@ Windows may initially put the icon under the tray's **^** overflow. Drag it besi
 - **Number color:** compares remaining quota with remaining time in the same window. Within ±5 percentage points is green; more than 5 points ahead is cyan. A deficit above 5 through 15 points is yellow, above 15 through 30 is orange, and above 30 is red. Empty quota is red. Missing or expired timing data is neutral gray. The tray color updates locally each minute without additional usage requests.
 - **Left-click:** all percentages, reset countdowns, local reset dates, and the last successful update time.
 - **Weekly progress bar:** upper lane shows quota remaining; the gold lower lane shows the percentage of the week remaining until reset. Both lanes and their text labels stay visible regardless of which is higher. Time is calculated from the reported reset and window duration, and updates every minute while the panel is open.
-- **Right-click:** Show limits, Refresh now, Show cost history, Choose cost-history file, Start with Windows, or Quit.
+- **Right-click:** Show limits, Refresh now, Test notification, Show cost history, Choose cost-history file, Start with Windows, or Quit.
 - **Refresh:** at launch, every 10 minutes, and after resuming Windows when an update is due.
 - **Early reset notification:** a Windows tray notification appears when a successful check reports increased remaining quota more than one minute before that window's previously scheduled reset. Click it to open all limits. Multiple affected windows share one notification; normal scheduled resets and unchanged readings stay quiet. Windows notification settings apply.
 - **Amber `!`:** a check failed or data is stale. Retained figures are marked as last known.
@@ -35,7 +35,7 @@ Windows may initially put the icon under the tray's **^** overflow. Drag it besi
 
 Supports weekly-only accounts, five-hour plus weekly windows, and multiple usage buckets. Missing values stay unavailable. Passing a reset time does not manufacture replenished quota.
 
-Early resets are inferred from consecutive successful readings while the app is running, including after a failed check. The first reading after launch establishes a baseline. Plan or window-duration changes establish a new baseline too. A changed reset time alone does not trigger an alert. Polling cannot identify the cause of replenishment, distinguish a switch between accounts on the same plan, or detect a reset if usage has already caught up with the previous reading.
+Early resets are inferred from consecutive successful readings while the app is running, including after a failed check. The first reading after launch establishes a baseline. Confirmed plan or window-duration changes establish a new baseline too; temporarily missing plan metadata does not. A changed reset time alone does not trigger an alert. Polling cannot identify the cause of replenishment, distinguish a switch between accounts on the same plan, or detect a reset if usage has already caught up with the previous reading.
 
 <img src="docs/images/icon-sizes.png" width="320" alt="Percentages 4, 40, 44, and 100 at 16, 20, 24, and 32 pixels">
 
@@ -132,6 +132,8 @@ See the [official Codex App Server protocol](https://learn.chatgpt.com/docs/app-
 
 **Different account:** The helper inherits `CODEX_HOME` if set. Limits belong to the signed-in account, not a single task.
 
+**Missing reset notification:** Right-click **Test notification** to exercise the same Windows notification path without changing quota. Check Windows notification settings if the test does not appear. The app keeps a local `data/notifications.jsonl` beside its executable, recording quota comparisons, sanitized poll errors, notification requests, and Windows balloon shown/closed/clicked callbacks. A shown callback is Windows acknowledgment, not proof that you saw the alert. The log rotates at 256 KiB and retains one previous file. It contains quota metadata, no credentials or conversations, and is never uploaded. Read-only install directories can prevent diagnostic storage; polling still works.
+
 **Uninstall:** Disable Start with Windows, choose Quit, and delete its folder.
 
 ## Build
@@ -157,6 +159,7 @@ Diagnostics:
 
 - `CodexMeter.exe --check <output.json>` performs one real usage check and writes normalized quota data. Keep that output private.
 - `CodexMeter.exe --preview <directory>` renders synthetic UI samples and small-icon comparisons.
+- After quitting the running app, `CodexMeter.exe --test-notification` launches normally and sends one labeled test notification after the initial check.
 
 ## License and acknowledgments
 

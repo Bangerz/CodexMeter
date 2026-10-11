@@ -3,3 +3,4 @@ obj/
 artifacts/
 .tools/
 *.user
+data/notifications.jsonl*

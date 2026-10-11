@@ -9,8 +9,11 @@ public static class UsageResetDetector
 
     public static IReadOnlyList<UsageReset> FindEarlyResets(UsageSnapshot? previous, UsageSnapshot current)
     {
-        if (previous is null || current.FetchedAt <= previous.FetchedAt
-            || !string.Equals(previous.Plan, current.Plan, StringComparison.Ordinal)) return [];
+        if (previous is null || current.FetchedAt <= previous.FetchedAt) return [];
+        // Plan metadata can be omitted temporarily. Only two known, different plans
+        // establish a plan change; missing metadata must not swallow a reset.
+        if (!string.IsNullOrWhiteSpace(previous.Plan) && !string.IsNullOrWhiteSpace(current.Plan)
+            && !string.Equals(previous.Plan, current.Plan, StringComparison.OrdinalIgnoreCase)) return [];
 
         var resets = new List<UsageReset>();
         foreach (var window in current.Windows)
