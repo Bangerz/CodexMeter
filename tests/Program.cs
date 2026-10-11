@@ -22,6 +22,7 @@ internal static class Program
         {
             CheckEarlyResets();
             CheckUsageDiagnostics();
+            CheckToastContent();
             Console.WriteLine($"PASS: {checks} focused early reset checks");
             return 0;
         }
@@ -40,6 +41,7 @@ internal static class Program
         }
         CheckEarlyResets();
         CheckUsageDiagnostics();
+        CheckToastContent();
         var weekly = Parse("""{"rateLimits":{"primary":{"usedPercent":55,"windowDurationMins":10080,"resetsAt":1789852721},"secondary":null,"planType":"pro"}}""");
         Check(weekly.Windows.Count == 1 && weekly.Windows[0].WindowName == "Weekly" && weekly.Windows[0].Remaining == 45,
             "Weekly-only Pro account does not invent a five-hour window");
@@ -235,6 +237,18 @@ internal static class Program
             File.Delete(path);
             File.Delete(path + ".previous");
         }
+    }
+
+    private static void CheckToastContent()
+    {
+        var title = "Codex <test> & quota";
+        var body = "Remaining: 20% → 98% \"left\"";
+        var xml = System.Xml.Linq.XElement.Parse(DesktopNotifications.Content(title, body));
+        Check((string?)xml.Attribute("activationType") == "foreground" && (string?)xml.Attribute("launch") == "show",
+            "Toast activation opens only Codex Meter's usage panel");
+        var texts = xml.Descendants("text").Select(element => element.Value).ToArray();
+        Check(texts.SequenceEqual(new[] { title, body }) && xml.Descendants("binding").Single().Attribute("template")?.Value == "ToastGeneric",
+            "Native toast XML preserves and escapes dynamic title and quota text");
     }
 
     private static void CheckPace()

@@ -27,9 +27,27 @@ internal static class Program
             Preview.Save(args[1]);
             return 0;
         }
+        if (args.Length == 2 && args[0] == "--notification-status")
+        {
+            try
+            {
+                File.WriteAllText(Path.GetFullPath(args[1]), JsonSerializer.Serialize(DesktopNotifications.Status()));
+                return 0;
+            }
+            catch (Exception ex)
+            {
+                File.WriteAllText(Path.GetFullPath(args[1]), JsonSerializer.Serialize(new { Error = "Could not read notification status.", ex.HResult }));
+                return 1;
+            }
+        }
         using var singleton = new Mutex(true, @"Local\CodexMeter.Tray.v1", out var created);
-        if (!created) return 0;
-        Application.Run(new TrayApp(args.Contains("--test-notification")));
+        if (!created)
+        {
+            if (args.Contains("--show") && EventWaitHandle.TryOpenExisting(TrayApp.ShowEventName, out var show))
+                using (show) show.Set();
+            return 0;
+        }
+        Application.Run(new TrayApp(args.Contains("--test-notification"), args.Contains("--show")));
         return 0;
     }
 }

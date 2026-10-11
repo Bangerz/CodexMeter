@@ -5,6 +5,7 @@ namespace CodexMeter;
 internal sealed class TrayApp : ApplicationContext
 {
     internal static readonly TimeSpan PollInterval = TimeSpan.FromMinutes(10);
+    internal const string ShowEventName = @"Local\CodexMeter.Show.v1";
     private readonly NotifyIcon tray;
     private readonly UsagePopup popup = new();
     private readonly CostHoverPopup costHover = new();
@@ -15,6 +16,9 @@ internal sealed class TrayApp : ApplicationContext
     private readonly CancellationTokenSource lifetime = new();
     private readonly CodexClient client = new();
     private readonly UsageDiagnostics diagnostics = new(Path.Combine(AppContext.BaseDirectory, "data", "notifications.jsonl"));
+    private readonly DesktopNotifications notifications;
+    private readonly EventWaitHandle showEvent = new(false, EventResetMode.AutoReset, ShowEventName);
+    private readonly RegisteredWaitHandle showWait;
     private readonly ToolStripMenuItem refreshItem;
     private readonly ToolStripMenuItem costItem;
     private readonly EventHandler idleHandler;
@@ -30,10 +34,17 @@ internal sealed class TrayApp : ApplicationContext
     private DateTimeOffset hoverShownAt;
     private bool IsStale => snapshot is not null && (error is not null || DateTimeOffset.UtcNow - snapshot.FetchedAt > PollInterval + TimeSpan.FromMinutes(1));
 
-    public TrayApp(bool testNotification = false)
+    public TrayApp(bool testNotification = false, bool showOnLaunch = false)
     {
+        notifications = new(diagnostics);
+        notifications.RegisterSender();
         // Ensure a UI handle exists for resume/theme events arriving on background threads.
         _ = popup.Handle;
+        showWait = ThreadPool.RegisterWaitForSingleObject(showEvent, (_, _) =>
+        {
+            if (!exiting) try { popup.BeginInvoke(() => { if (!exiting) ShowPopup(); }); }
+                catch (InvalidOperationException) { }
+        }, null, Timeout.Infinite, executeOnlyOnce: false);
         var menu = new ContextMenuStrip();
         menu.Items.Add("Show limits", null, (_, _) => ShowPopup());
         refreshItem = new ToolStripMenuItem("Refresh now", null, async (_, _) => await RefreshAsync());
@@ -59,9 +70,6 @@ internal sealed class TrayApp : ApplicationContext
         tray.MouseClick += (_, e) => { HideCostHover(); if (e.Button == MouseButtons.Left) { if (popup.Visible) popup.Hide(); else ShowPopup(); } };
         tray.MouseMove += (_, _) => ShowCostHover();
         tray.MouseDown += (_, _) => HideCostHover();
-        tray.BalloonTipShown += (_, _) => diagnostics.Write("shell_balloon_shown");
-        tray.BalloonTipClosed += (_, _) => diagnostics.Write("shell_balloon_closed");
-        tray.BalloonTipClicked += (_, _) => { diagnostics.Write("shell_balloon_clicked"); ShowPopup(); };
         menu.Opening += (_, _) => HideCostHover();
         hoverTimer.Tick += (_, _) =>
         {
@@ -85,6 +93,7 @@ internal sealed class TrayApp : ApplicationContext
             Application.Idle -= idleHandler;
             await RefreshAsync();
             if (testNotification && !exiting) ShowTestNotification();
+            if (showOnLaunch && !exiting) ShowPopup();
         };
         Application.Idle += idleHandler;
     }
@@ -131,8 +140,9 @@ internal sealed class TrayApp : ApplicationContext
 
     private void ShowNotification(string kind, string title, string text)
     {
-        diagnostics.Write("notification_requested", new { Type = kind, Title = title, Text = text });
-        tray.ShowBalloonTip(10_000, title, text, ToolTipIcon.Info);
+        if (!notifications.Show(kind, title, text) && kind == "test")
+            MessageBox.Show("Windows could not accept the test notification. Check the Codex Meter notification settings and the local notification log.",
+                "Codex Meter", MessageBoxButtons.OK, MessageBoxIcon.Information);
     }
 
     private void UpdateTrayIcon()
@@ -244,6 +254,9 @@ internal sealed class TrayApp : ApplicationContext
         if (exiting) return;
         exiting = true;
         diagnostics.Write("stopped");
+        notifications.Dispose();
+        showWait.Unregister(null);
+        showEvent.Dispose();
         Application.Idle -= idleHandler;
         SystemEvents.PowerModeChanged -= OnPowerModeChanged;
         SystemEvents.UserPreferenceChanged -= OnPreferencesChanged;

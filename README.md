@@ -29,7 +29,7 @@ Windows may initially put the icon under the tray's **^** overflow. Drag it besi
 - **Weekly progress bar:** upper lane shows quota remaining; the gold lower lane shows the percentage of the week remaining until reset. Both lanes and their text labels stay visible regardless of which is higher. Time is calculated from the reported reset and window duration, and updates every minute while the panel is open.
 - **Right-click:** Show limits, Refresh now, Test notification, Show cost history, Choose cost-history file, Start with Windows, or Quit.
 - **Refresh:** at launch, every 10 minutes, and after resuming Windows when an update is due.
-- **Early reset notification:** a Windows tray notification appears when a successful check reports increased remaining quota more than one minute before that window's previously scheduled reset. Click it to open all limits. Multiple affected windows share one notification; normal scheduled resets and unchanged readings stay quiet. Windows notification settings apply.
+- **Early reset notification:** a Windows toast from **Codex Meter** appears when a successful check reports increased remaining quota more than one minute before that window's previously scheduled reset. Click it to open all limits. Multiple affected windows share one notification; normal scheduled resets and unchanged readings stay quiet. The latest reset notification remains in Notification Center for up to 24 hours unless dismissed or replaced. Windows notification settings apply.
 - **Amber `!`:** a check failed or data is stale. Retained figures are marked as last known.
 - **Start with Windows:** optional, off by default. Enable after choosing a permanent folder; disable before moving or deleting the app.
 
@@ -132,7 +132,9 @@ See the [official Codex App Server protocol](https://learn.chatgpt.com/docs/app-
 
 **Different account:** The helper inherits `CODEX_HOME` if set. Limits belong to the signed-in account, not a single task.
 
-**Missing reset notification:** Right-click **Test notification** to exercise the same Windows notification path without changing quota. Check Windows notification settings if the test does not appear. The app keeps a local `data/notifications.jsonl` beside its executable, recording quota comparisons, sanitized poll errors, notification requests, and Windows balloon shown/closed/clicked callbacks. A shown callback is Windows acknowledgment, not proof that you saw the alert. The log rotates at 256 KiB and retains one previous file. It contains quota metadata, no credentials or conversations, and is never uploaded. Read-only install directories can prevent diagnostic storage; polling still works.
+**Missing reset notification:** Right-click **Test notification** to exercise the same Windows toast path without changing quota. The app registers its own sender, **Codex Meter** (`Bangerz.CodexMeter`), instead of using legacy tray balloons. After upgrading from balloon notifications, add this sender under **Settings → System → Notifications → Set priority notifications** if you want it allowed during Do Not Disturb. High/Top notification ordering is a separate setting. Windows automatic DND rules can still affect banner display; check Notification Center as well.
+
+The app keeps a local `data/notifications.jsonl` beside its executable, recording quota comparisons, sanitized poll errors, toast submissions, notification setting status, and toast failure/dismissal callbacks. Submission does not prove banner visibility. The log rotates at 256 KiB and retains one previous file. It contains quota metadata, no credentials or conversations, and is never uploaded. Read-only install directories can prevent diagnostic storage; polling still works. Sender registration uses `HKCU\Software\Classes\AppUserModelId\Bangerz.CodexMeter` and its dedicated COM activation entry under `HKCU\Software\Classes\CLSID\{31D28E52-1CBB-4B37-A288-9A0AEEA5DE40}`. Clicking a notification opens only the usage panel.
 
 **Uninstall:** Disable Start with Windows, choose Quit, and delete its folder.
 
@@ -160,6 +162,7 @@ Diagnostics:
 - `CodexMeter.exe --check <output.json>` performs one real usage check and writes normalized quota data. Keep that output private.
 - `CodexMeter.exe --preview <directory>` renders synthetic UI samples and small-icon comparisons.
 - After quitting the running app, `CodexMeter.exe --test-notification` launches normally and sends one labeled test notification after the initial check.
+- `CodexMeter.exe --notification-status <output.json>` reads only Codex Meter's notification setting and retained Notification Center entries. Keep that quota-bearing diagnostic output private.
 
 ## License and acknowledgments
 
