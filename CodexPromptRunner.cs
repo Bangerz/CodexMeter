@@ -26,6 +26,8 @@ public sealed class CodexPromptRunner
 
     public async Task<PromptRunResult> RunAsync(PromptRule rule, CancellationToken cancellationToken)
     {
+        if (rule.Action != PromptAction.CodexPrompt)
+            return await new CodexGoalController().RunAsync(rule, cancellationToken);
         using var deadline = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         deadline.CancelAfter(TimeSpan.FromMinutes(rule.TimeoutMinutes));
         Process? process = null;
@@ -50,7 +52,7 @@ public sealed class CodexPromptRunner
             deadline.Token.ThrowIfCancellationRequested();
             var text = await output.WaitAsync(deadline.Token);
             await errors.WaitAsync(deadline.Token);
-            return new(process.ExitCode == 0 ? "Finished" : $"Failed (exit {process.ExitCode})",
+            return new(process.ExitCode == 0 ? "Response received — review result" : $"Failed (exit {process.ExitCode})",
                 string.IsNullOrWhiteSpace(text) ? "No final response. Check Codex sign-in, permissions, and the saved CLI session." : text);
         }
         catch (OperationCanceledException)

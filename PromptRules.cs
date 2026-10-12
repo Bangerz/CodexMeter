@@ -6,12 +6,14 @@ namespace CodexMeter;
 public enum QuotaScope { MostLimited, CodexWeekly, CodexFiveHour }
 public enum ThresholdDirection { RisesToOrAbove, FallsToOrBelow }
 public enum PromptPermissions { ReadOnly, WorkspaceWrite }
+public enum PromptAction { CodexPrompt, PauseRecentGoals, ResumeRecentGoals }
 
 public sealed record PromptRule
 {
     public Guid Id { get; init; } = Guid.NewGuid();
     public string Name { get; init; } = "New rule";
     public bool Enabled { get; init; }
+    public PromptAction Action { get; init; }
     public QuotaScope Scope { get; init; }
     public ThresholdDirection Direction { get; init; }
     public double Threshold { get; init; } = 80;
@@ -27,14 +29,14 @@ public sealed record PromptRule
     {
         if (Id == Guid.Empty || string.IsNullOrWhiteSpace(Name) || Name.Length > 80)
             throw new FormatException("Each rule needs an ID and a name of at most 80 characters.");
-        if (!Enum.IsDefined(Scope) || !Enum.IsDefined(Direction) || !Enum.IsDefined(Permissions)
+        if (!Enum.IsDefined(Scope) || !Enum.IsDefined(Direction) || !Enum.IsDefined(Permissions) || !Enum.IsDefined(Action)
             || !double.IsFinite(Threshold) || Threshold is < 0 or > 100 || TimeoutMinutes is < 1 or > 60)
             throw new FormatException($"{Name}: select a valid quota, direction, threshold (0–100), and timeout (1–60 minutes).");
-        if (string.IsNullOrWhiteSpace(Prompt) || Prompt.Length > 32_000)
+        if (Action == PromptAction.CodexPrompt && (string.IsNullOrWhiteSpace(Prompt) || Prompt.Length > 32_000))
             throw new FormatException($"{Name}: enter a prompt of at most 32,000 characters.");
-        if (string.IsNullOrWhiteSpace(WorkingDirectory) || !Path.IsPathFullyQualified(WorkingDirectory))
+        if (Action == PromptAction.CodexPrompt && (string.IsNullOrWhiteSpace(WorkingDirectory) || !Path.IsPathFullyQualified(WorkingDirectory)))
             throw new FormatException($"{Name}: choose an absolute working folder.");
-        if (Enabled && !Directory.Exists(WorkingDirectory))
+        if (Action == PromptAction.CodexPrompt && Enabled && !Directory.Exists(WorkingDirectory))
             throw new FormatException($"{Name}: the working folder does not exist.");
     }
 
@@ -42,9 +44,9 @@ public sealed record PromptRule
 
     public static List<PromptRule> Examples() =>
     [
-        new() { Name = "Resume goals", Threshold = 80, Direction = ThresholdDirection.RisesToOrAbove,
+        new() { Name = "Resume goals", Action = PromptAction.ResumeRecentGoals, Threshold = 80, Direction = ThresholdDirection.RisesToOrAbove,
             Prompt = "Search the last 20 active sessions for paused goals and resume them. Use supported session/goal controls. If those controls are unavailable, report that limitation; do not edit session files or databases directly." },
-        new() { Name = "Pause goals", Threshold = 20, Direction = ThresholdDirection.FallsToOrBelow,
+        new() { Name = "Pause goals", Action = PromptAction.PauseRecentGoals, Threshold = 20, Direction = ThresholdDirection.FallsToOrBelow,
             Prompt = "Search the last 20 active sessions for active goals and pause them. Use supported session/goal controls. If those controls are unavailable, report that limitation; do not edit session files or databases directly." }
     ];
 }

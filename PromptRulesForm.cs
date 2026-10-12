@@ -7,6 +7,8 @@ internal sealed class PromptRulesForm : Form
     private readonly ListBox list = new() { Dock = DockStyle.Fill, IntegralHeight = false };
     private readonly TextBox name = new() { Dock = DockStyle.Fill, MaxLength = 80 };
     private readonly CheckBox enabled = new() { Text = "Enable this rule", AutoSize = true };
+    private readonly ComboBox action = Choice("Run Codex prompt", "Pause recent goals (direct)", "Resume recent goals (direct)");
+    private readonly Label actionNote = new() { Dock = DockStyle.Fill };
     private readonly ComboBox quota = Choice("Lowest remaining across all windows", "Codex weekly", "Codex 5-hour");
     private readonly ComboBox direction = Choice("Rises to or above (≥)", "Falls to or below (≤)");
     private readonly NumericUpDown threshold = new() { Minimum = 0, Maximum = 100, DecimalPlaces = 1, Width = 78 };
@@ -38,7 +40,7 @@ internal sealed class PromptRulesForm : Form
         shell.RowStyles.Add(new RowStyle(SizeType.Absolute, 68));
         shell.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
         shell.RowStyles.Add(new RowStyle(SizeType.Absolute, 44));
-        var intro = new Label { Dock = DockStyle.Fill, Text = "Run a Codex prompt when remaining quota crosses a threshold. A rule runs once, then rearms on the opposite side.\nNew or edited rules take a baseline first. Checked with each successful 10-minute poll; a reserve is not a hard spending cap." };
+        var intro = new Label { Dock = DockStyle.Fill, Text = "Run an action when remaining quota crosses a threshold. A rule runs once, then rearms on the opposite side.\nNew or edited rules take a baseline first. Checked with each successful 10-minute poll; a reserve is not a hard spending cap." };
         shell.Controls.Add(intro, 0, 0); shell.SetColumnSpan(intro, 2);
         var navigation = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 2, Margin = new Padding(0, 0, 12, 0) };
         navigation.RowStyles.Add(new RowStyle(SizeType.Percent, 100)); navigation.RowStyles.Add(new RowStyle(SizeType.Absolute, 40));
@@ -50,7 +52,11 @@ internal sealed class PromptRulesForm : Form
         editor.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 145)); editor.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
         foreach (var height in new[] { 32, 32, 36, 36, 132, 36, 36, 34, 65, 42 }) editor.RowStyles.Add(new RowStyle(SizeType.Absolute, height));
         editor.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
-        AddRow(0, "Rule name", name); AddRow(1, "", enabled); AddRow(2, "Quota", quota);
+        var actionRow = new FlowLayoutPanel { Dock = DockStyle.Fill, WrapContents = false };
+        action.Dock = DockStyle.None; action.Width = 270;
+        enabled.Margin = new Padding(3, 6, 8, 3);
+        actionRow.Controls.Add(enabled); actionRow.Controls.Add(action);
+        AddRow(0, "Rule name", name); AddRow(1, "Action", actionRow); AddRow(2, "Quota", quota);
         var boundary = new FlowLayoutPanel { Dock = DockStyle.Fill, WrapContents = false };
         direction.Width = 220; direction.Dock = DockStyle.None;
         boundary.Controls.Add(direction); boundary.Controls.Add(threshold);
@@ -63,15 +69,15 @@ internal sealed class PromptRulesForm : Form
         var timeRow = new FlowLayoutPanel { Dock = DockStyle.Fill, WrapContents = false };
         timeRow.Controls.Add(timeout); timeRow.Controls.Add(new Label { Text = "minutes maximum per run", AutoSize = true, Padding = new Padding(0, 5, 0, 0) });
         AddRow(7, "Timeout", timeRow);
-        var note = new Label { Dock = DockStyle.Fill, Text = "Runs a separate CLI session with your Codex login and model; consumes quota.\nDesktop chat tools are not supplied. Extra permissions cannot be approved during a run." };
-        editor.Controls.Add(note, 0, 8); editor.SetColumnSpan(note, 2);
+        editor.Controls.Add(actionNote, 0, 8); editor.SetColumnSpan(actionNote, 2);
         AddRow(9, "Last attempt", status); AddRow(10, "Final response", result); shell.Controls.Add(editor, 1, 1);
         var footer = new FlowLayoutPanel { Dock = DockStyle.Fill, FlowDirection = FlowDirection.RightToLeft, WrapContents = false };
         var save = Button("Save rules", (_, _) => SaveRules()); save.Width = 120;
         var close = Button("Close", (_, _) => Close()); close.Width = 100;
         footer.Controls.Add(save); footer.Controls.Add(close); footer.Controls.Add(Button("Cancel runs", (_, _) => { automation.CancelRuns(); UpdateStatus(); }));
         shell.Controls.Add(footer, 0, 2); shell.SetColumnSpan(footer, 2); Controls.Add(shell);
-        list.SelectedIndexChanged += (_, _) => SelectRule(); refresh.Tick += (_, _) => UpdateStatus(); refresh.Start();
+        list.SelectedIndexChanged += (_, _) => SelectRule(); action.SelectedIndexChanged += (_, _) => UpdateAction();
+        refresh.Tick += (_, _) => UpdateStatus(); refresh.Start();
         RefreshList(rules.Count == 0 ? -1 : 0);
     }
 
@@ -93,7 +99,7 @@ internal sealed class PromptRulesForm : Form
     private void CaptureEdits()
     {
         if (loading || selected < 0 || selected >= rules.Count) return;
-        rules[selected] = rules[selected] with { Name = name.Text.Trim(), Enabled = enabled.Checked, Scope = (QuotaScope)quota.SelectedIndex,
+        rules[selected] = rules[selected] with { Name = name.Text.Trim(), Enabled = enabled.Checked, Action = (PromptAction)action.SelectedIndex, Scope = (QuotaScope)quota.SelectedIndex,
             Direction = (ThresholdDirection)direction.SelectedIndex, Threshold = (double)threshold.Value, Prompt = prompt.Text,
             WorkingDirectory = folder.Text.Trim(), Permissions = (PromptPermissions)permissions.SelectedIndex, TimeoutMinutes = (int)timeout.Value };
     }
@@ -103,11 +109,19 @@ internal sealed class PromptRulesForm : Form
         CaptureEdits(); selected = list.SelectedIndex; loading = true; editor.Enabled = selected >= 0;
         if (selected >= 0)
         {
-            var rule = rules[selected]; name.Text = rule.Name; enabled.Checked = rule.Enabled; quota.SelectedIndex = (int)rule.Scope;
+            var rule = rules[selected]; name.Text = rule.Name; enabled.Checked = rule.Enabled; action.SelectedIndex = (int)rule.Action; quota.SelectedIndex = (int)rule.Scope;
             direction.SelectedIndex = (int)rule.Direction; threshold.Value = (decimal)rule.Threshold; prompt.Text = rule.Prompt;
             folder.Text = rule.WorkingDirectory; permissions.SelectedIndex = (int)rule.Permissions; timeout.Value = rule.TimeoutMinutes;
         }
-        loading = false; UpdateStatus();
+        loading = false; UpdateAction(); UpdateStatus();
+    }
+    private void UpdateAction()
+    {
+        var direct = action.SelectedIndex > 0;
+        prompt.Enabled = !direct; folder.Parent!.Enabled = !direct; permissions.Enabled = !direct; timeout.Enabled = !direct;
+        actionNote.Text = direct
+            ? "Checks 20 recent non-archived local sessions through goal APIs (60-second limit). No model call.\nPreserves objectives and budgets; skips blocked, completed, and budget-limited goals."
+            : "Runs a separate CLI session with your Codex login and model; consumes quota.\nDesktop chat tools are not supplied. Extra permissions cannot be approved during a run.";
     }
     private void RefreshList(int index)
     {
@@ -140,7 +154,7 @@ internal sealed class PromptRulesForm : Form
     }
     internal void CheckPreviewSelections()
     {
-        if (selected >= 0 && (quota.SelectedItem is null || direction.SelectedItem is null || permissions.SelectedItem is null))
+        if (selected >= 0 && (quota.SelectedItem is null || direction.SelectedItem is null || permissions.SelectedItem is null || action.SelectedItem is null))
             throw new InvalidOperationException("A rule selector has no selected value.");
     }
     protected override void Dispose(bool disposing) { if (disposing) refresh.Dispose(); base.Dispose(disposing); }

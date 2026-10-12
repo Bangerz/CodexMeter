@@ -58,14 +58,14 @@ internal static class PromptChecks
             Check(!info.UseShellExecute && info.CreateNoWindow && !info.ArgumentList.Contains(rule.Prompt) && info.ArgumentList.Contains("--no-daemon"), "Prompt bypasses shell and command line and owns its helper");
             Check(info.ArgumentList.Contains("read-only") && info.ArgumentList.Contains("never") && !info.ArgumentList.Any(a => a.Contains("bypass")), "No approval or sandbox bypass flags");
             var runner = new CodexPromptRunner(); var result = await runner.RunAsync(rule, CancellationToken.None);
-            Check(result.Status == "Finished" && result.Output.Contains("FAKE RESULT"), "Exec completion and final response captured");
+            Check(result.Status == "Response received — review result" && result.Output.Contains("FAKE RESULT"), "A model response is not labeled completed action");
             using (var log = JsonDocument.Parse(File.ReadAllText(Path.Combine(root, "exec.json"))))
                 Check(log.RootElement.GetProperty("Prompt").GetString() == rule.Prompt, "Multiline Unicode prompt arrives unchanged on stdin");
             Environment.SetEnvironmentVariable("METER_PROMPT_TEST_MODE", "fail");
             result = await runner.RunAsync(rule, CancellationToken.None); Check(result.Status == "Failed (exit 7)", "Nonzero exit is visible");
             Environment.SetEnvironmentVariable("METER_PROMPT_TEST_MODE", "large");
             result = await runner.RunAsync(rule, CancellationToken.None);
-            Check(result.Status == "Finished" && result.Output.Length < 16_100 && result.Output.EndsWith("[Response truncated by Meter]"), "Large output is drained and bounded without blocking");
+            Check(result.Status == "Response received — review result" && result.Output.Length < 16_100 && result.Output.EndsWith("[Response truncated by Meter]"), "Large output is drained and bounded without blocking");
             Environment.SetEnvironmentVariable("METER_PROMPT_TEST_MODE", "wait");
             using var cancellation = new CancellationTokenSource(TimeSpan.FromMilliseconds(500));
             result = await runner.RunAsync(rule, cancellation.Token); Check(result.Status == "Cancelled", "Cancellation stops the owned child");

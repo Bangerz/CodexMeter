@@ -8,6 +8,12 @@ internal static class Program
     private static int Main(string[] args)
     {
         ApplicationConfiguration.Initialize();
+        if (args.Length == 2 && args[0] == "--goal-status")
+        {
+            var result = new CodexGoalController().InspectAsync().GetAwaiter().GetResult();
+            File.WriteAllText(Path.GetFullPath(args[1]), JsonSerializer.Serialize(result));
+            return result.Failed == 0 ? 0 : 1;
+        }
         if (args.Length == 2 && args[0] == "--check")
         {
             try

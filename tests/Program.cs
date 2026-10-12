@@ -9,7 +9,9 @@ internal static class Program
 
     private static async Task<int> Main(string[] args)
     {
-        if (args.Contains("app-server")) return await FakeServer();
+        if (args.Contains("app-server")) return Environment.GetEnvironmentVariable("METER_GOAL_TEST") is not null
+            ? await GoalChecks.FakeServer() : await FakeServer();
+        if (args.Contains("--goal-check")) return await GoalChecks.Run();
         if (args.Contains("exec")) return await PromptChecks.FakeCodex(args);
         if (args.Contains("--prompt-check")) return await PromptChecks.Run();
         if (args.Length == 2 && args[0] == "--cost-file")

@@ -90,13 +90,15 @@ public sealed class PromptAutomation
                 if (!Update(trigger, "Running", "")) break;
                 using var cancellation = new CancellationTokenSource();
                 running = cancellation;
-                Notice?.Invoke("Codex prompt started", $"{rule.Name}: {trigger.Remaining:0.##}% remaining.");
+                Notice?.Invoke("Codex rule started", $"{rule.Name}: {trigger.Remaining:0.##}% remaining.");
                 PromptRunResult result;
                 try { result = await run(rule, cancellation.Token); }
                 catch (Exception) { result = new("Failed to run", "Unexpected execution error. The crossing will not be retried automatically."); }
                 finally { running = null; }
                 Update(trigger, result.Status, result.Output);
-                if (!stopped) Notice?.Invoke("Codex prompt " + result.Status.ToLowerInvariant(), $"{rule.Name}. View its result in Prompt rules.");
+                if (!stopped) Notice?.Invoke("Codex rule " + result.Status.ToLowerInvariant(), $"{rule.Name}. "
+                    + (rule.Action == PromptAction.CodexPrompt ? "Read the response in Prompt rules to confirm the requested action succeeded."
+                        : result.Output.Split('\n')[0]));
             }
         }
         finally { draining = false; }
