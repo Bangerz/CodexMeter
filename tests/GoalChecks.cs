@@ -36,6 +36,35 @@ internal static class GoalChecks
             Check(set.GetProperty("threadId").GetString() == "paused" && set.GetProperty("status").GetString() == "active", "Blocked and budget-limited goals remain untouched");
             var inspected = await new CodexGoalController().InspectAsync();
             Check(inspected.Checked == 7 && inspected.Changed == 0 && inspected.States["paused"] == 1, "Read-only inspection returns states without updates");
+            inspected = await new CodexGoalController().InspectAsync(recentSessionLimit: 3);
+            Check(inspected.Checked == 3, "Never scan beyond the configured limit even if a server returns extra items");
+            Environment.SetEnvironmentVariable("METER_GOAL_TEST", "paged");
+            result = await new CodexPromptRunner().RunAsync(rule with { RecentSessionLimit = 50 }, CancellationToken.None);
+            Check(result.Status == "Completed" && result.Output.StartsWith("Checked 50 ") && result.Output.Contains("1 goals paused"), "A goal on session 50 is reached across capped API pages");
+            trace = JsonSerializer.Deserialize<List<JsonElement>>(File.ReadAllText(tracePath))!;
+            var pages = trace.Where(t => t.GetProperty("method").GetString() == "thread/list").ToArray();
+            Check(pages.Length == 3 && pages.Select(t => t.GetProperty("params").GetProperty("limit").GetInt32()).SequenceEqual(new[] { 50, 33, 16 }), "Pagination requests only the remaining session count");
+            Check(trace.FindLastIndex(t => t.GetProperty("method").GetString() == "thread/list")
+                < trace.FindIndex(t => t.GetProperty("method").GetString() == "thread/goal/set"), "Discovery finishes before changes can reorder the session list");
+            inspected = await new CodexGoalController().InspectAsync(recentSessionLimit: 50);
+            Check(inspected.Checked == 50 && inspected.Changed == 0 && inspected.States["active"] == 1, "Read-only inspection honors the configured count too");
+            Environment.SetEnvironmentVariable("METER_GOAL_TEST", "empty");
+            result = await new CodexPromptRunner().RunAsync(rule, CancellationToken.None);
+            Check(result.Status == "Failed" && result.Output.Contains("profile"), "An empty profile does not masquerade as a successful scan");
+            Environment.SetEnvironmentVariable("METER_GOAL_TEST", "repeated-cursor");
+            result = await new CodexPromptRunner().RunAsync(rule with { RecentSessionLimit = 50 }, CancellationToken.None);
+            Check(result.Status == "Failed" && result.Output.Contains("scan incomplete"), "Repeated cursors fail without duplicating goal actions");
+            trace = JsonSerializer.Deserialize<List<JsonElement>>(File.ReadAllText(tracePath))!;
+            Check(!trace.Any(t => t.GetProperty("method").GetString() == "thread/goal/set"), "An incomplete discovery changes no goals");
+            Check(JsonSerializer.Deserialize<PromptRule>("{}")!.RecentSessionLimit == 20, "Existing rules retain the previous 20-session default");
+            var store = new PromptRuleStore(Path.Combine(root, "settings.json"));
+            store.Save(new() { Rules = [rule with { RecentSessionLimit = 50 }], States = new() { [rule.Id] = new() { OnTriggerSide = true } } });
+            Check(store.Load().Rules.Single().RecentSessionLimit == 50 && store.Load().States[rule.Id].OnTriggerSide == true, "Session count and consumed crossing survive reload");
+            foreach (var invalid in new[] { 0, 101 })
+            {
+                try { (rule with { RecentSessionLimit = invalid }).Validate(); throw new Exception("Invalid session count accepted"); }
+                catch (FormatException) { Check(true, "Out-of-range session counts are rejected"); }
+            }
             Environment.SetEnvironmentVariable("METER_GOAL_TEST", "race");
             result = await new CodexPromptRunner().RunAsync(rule, CancellationToken.None);
             Check(result.Status == "Completed" && result.Output.Contains("0 goals paused"), "An intervening completion is respected");
@@ -60,6 +89,8 @@ internal static class GoalChecks
         var mode = Environment.GetEnvironmentVariable("METER_GOAL_TEST");
         var states = new Dictionary<string, string?> { ["active"] = "active", ["paused"] = "paused", ["blocked"] = "blocked",
             ["budget"] = "budgetLimited", ["usage"] = "usageLimited", ["done"] = "complete", ["none"] = null };
+        if (mode is "paged" or "repeated-cursor") states = Enumerable.Range(0, 50).ToDictionary(i => "session-" + i, i => i == 49 ? "active" : (string?)null);
+        if (mode == "empty") states.Clear();
         var reads = new Dictionary<string, int>(); var trace = new List<JsonElement>();
         object? Goal(string id) => states[id] is { } status ? new { threadId = id, status, objective = "Keep the existing goal", tokenBudget = mode == "bad-budget" && status == "paused" && id == "active" ? 999 : 100,
             tokensUsed = 40, timeUsedSeconds = 10, createdAt = 1, updatedAt = 2 } : null;
@@ -73,7 +104,10 @@ internal static class GoalChecks
             switch (method)
             {
                 case "initialize": result = new { }; break;
-                case "thread/list": result = new { data = states.Keys.Select(id => new { id }).ToArray() }; break;
+                case "thread/list":
+                    var offset = mode == "paged" && p.TryGetProperty("cursor", out var cursor) && cursor.ValueKind == JsonValueKind.String ? int.Parse(cursor.GetString()!) : 0;
+                    var page = states.Keys.Skip(offset).Take(mode is "paged" or "repeated-cursor" ? Math.Min(17, p.GetProperty("limit").GetInt32()) : states.Count).Select(id => new { id }).ToArray();
+                    result = new { data = page, nextCursor = offset + page.Length < states.Count ? (offset + page.Length).ToString() : null }; break;
                 case "thread/goal/get":
                     var readId = p.GetProperty("threadId").GetString()!;
                     reads[readId] = reads.GetValueOrDefault(readId) + 1;

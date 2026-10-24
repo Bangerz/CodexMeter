@@ -13,7 +13,7 @@ public sealed class CodexGoalController
     {
         rule.Validate();
         if (rule.Action == PromptAction.CodexPrompt) throw new ArgumentException("Select a goal action.");
-        var result = await InspectOrChangeAsync(rule.Action, token);
+        var result = await InspectOrChangeAsync(rule.Action, rule.RecentSessionLimit, token);
         return new(result.Failed == 0 ? "Completed" : result.Changed > 0 ? "Partially completed" : "Failed",
             $"Checked {result.Checked} recent non-archived sessions. {result.Changed} goals {result.Verb}. "
             + $"{result.Unchanged} unchanged or without a matching goal. {result.Failed} failed."
@@ -21,10 +21,12 @@ public sealed class CodexGoalController
             + "\nOnly active goals are paused; only paused goals are resumed. Objectives, budgets and usage history are preserved.");
     }
 
-    public Task<GoalActionSummary> InspectAsync(CancellationToken token = default) => InspectOrChangeAsync(null, token);
+    public Task<GoalActionSummary> InspectAsync(CancellationToken token = default, int recentSessionLimit = 20) =>
+        InspectOrChangeAsync(null, recentSessionLimit, token);
 
-    private static async Task<GoalActionSummary> InspectOrChangeAsync(PromptAction? action, CancellationToken token)
+    private static async Task<GoalActionSummary> InspectOrChangeAsync(PromptAction? action, int recentSessionLimit, CancellationToken token)
     {
+        if (recentSessionLimit is < 1 or > 100) throw new ArgumentOutOfRangeException(nameof(recentSessionLimit));
         using var deadline = CancellationTokenSource.CreateLinkedTokenSource(token);
         deadline.CancelAfter(TimeSpan.FromSeconds(60));
         var count = 0; var changed = 0; var unchanged = 0; var failed = 0;
@@ -34,17 +36,37 @@ public sealed class CodexGoalController
         {
             await using var rpc = new GoalRpc();
             await rpc.StartAsync(deadline.Token);
-            var list = await rpc.CallAsync("thread/list", new { limit = 20, sortKey = "updated_at", sortDirection = "desc",
-                sourceKinds = new[] { "cli", "vscode", "appServer" }, archived = false, useStateDbOnly = true }, deadline.Token);
-            if (!list.TryGetProperty("data", out var threads) || threads.ValueKind != JsonValueKind.Array)
-                throw new GoalApiException("Codex returned no session list.");
-            foreach (var thread in threads.EnumerateArray().Take(20))
+            // Finish discovery before any mutations: the server may cap page
+            // sizes, and updating goals must not reorder an unfinished scan.
+            var ids = new List<string>();
+            var seen = new HashSet<string>();
+            var cursors = new HashSet<string>();
+            string? cursor = null;
+            do
+            {
+                var list = await rpc.CallAsync("thread/list", new { limit = recentSessionLimit - ids.Count, cursor,
+                    sortKey = "updated_at", sortDirection = "desc", sourceKinds = new[] { "cli", "vscode", "appServer" },
+                    archived = false, useStateDbOnly = true }, deadline.Token);
+                if (!list.TryGetProperty("data", out var threads) || threads.ValueKind != JsonValueKind.Array)
+                    throw new GoalApiException("Codex returned no session list.");
+                foreach (var thread in threads.EnumerateArray())
+                {
+                    var id = thread.GetProperty("id").GetString() ?? throw new GoalApiException("A session has no ID.");
+                    if (seen.Add(id)) ids.Add(id);
+                    if (ids.Count == recentSessionLimit) break;
+                }
+                cursor = list.TryGetProperty("nextCursor", out var next) ? next.GetString() : null;
+                if (ids.Count >= recentSessionLimit || string.IsNullOrEmpty(cursor)) break;
+                if (!cursors.Add(cursor)) throw new GoalApiException("Codex repeated a session-list cursor; scan incomplete.");
+            } while (true);
+            if (ids.Count == 0)
+                throw new GoalApiException("No recent sessions found. Check that Meter is running with your usual Codex profile.");
+            foreach (var id in ids)
             {
                 deadline.Token.ThrowIfCancellationRequested();
                 count++;
                 try
                 {
-                    var id = thread.GetProperty("id").GetString() ?? throw new GoalApiException("A session has no ID.");
                     var result = await rpc.CallAsync("thread/goal/get", new { threadId = id }, deadline.Token);
                     var goal = result.GetProperty("goal");
                     var status = goal.ValueKind == JsonValueKind.Object ? goal.GetProperty("status").GetString() ?? "unknown" : "none";
@@ -75,7 +97,7 @@ public sealed class CodexGoalController
         }
         catch (OperationCanceledException)
         { return new(count, changed, unchanged, Math.Max(1, failed), verb, states, token.IsCancellationRequested ? "Goal action cancelled; completed updates remain applied." : "Goal API timed out; completed updates remain applied."); }
-        catch (Exception ex) when (ex is GoalApiException or Win32Exception or UsageException or IOException or JsonException or UnauthorizedAccessException)
+        catch (Exception ex) when (ex is GoalApiException or Win32Exception or UsageException or IOException or JsonException or UnauthorizedAccessException or KeyNotFoundException or InvalidOperationException)
         { return new(count, changed, unchanged, Math.Max(1, failed), verb, states, ex is GoalApiException ? ex.Message : "Could not access Codex goal controls. Check its installation and session-state access."); }
     }
 

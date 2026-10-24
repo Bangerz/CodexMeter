@@ -13,6 +13,9 @@ internal sealed class PromptRulesForm : Form
     private readonly ComboBox direction = Choice("Rises to or above (≥)", "Falls to or below (≤)");
     private readonly NumericUpDown threshold = new() { Minimum = 0, Maximum = 100, DecimalPlaces = 1, Width = 78 };
     private readonly TextBox prompt = new() { Dock = DockStyle.Fill, Multiline = true, ScrollBars = ScrollBars.Vertical, MaxLength = 32_000, AcceptsReturn = true };
+    private readonly NumericUpDown recentSessions = new() { Minimum = 1, Maximum = 100, Value = 20, Width = 78 };
+    private readonly FlowLayoutPanel goalSettings = new() { Dock = DockStyle.Fill, FlowDirection = FlowDirection.TopDown, WrapContents = false };
+    private readonly Label actionSettingsLabel;
     private readonly TextBox folder = new() { Dock = DockStyle.Fill };
     private readonly ComboBox permissions = Choice("Read-only", "Allow edits in working folder");
     private readonly NumericUpDown timeout = new() { Minimum = 1, Maximum = 60, Width = 70 };
@@ -61,7 +64,16 @@ internal sealed class PromptRulesForm : Form
         direction.Width = 220; direction.Dock = DockStyle.None;
         boundary.Controls.Add(direction); boundary.Controls.Add(threshold);
         boundary.Controls.Add(new Label { Text = "% remaining", AutoSize = true, Padding = new Padding(0, 5, 0, 0) });
-        AddRow(3, "Trigger", boundary); AddRow(4, "Codex prompt", prompt);
+        AddRow(3, "Trigger", boundary);
+        var sessionRow = new FlowLayoutPanel { Width = 520, Height = 38, WrapContents = false };
+        sessionRow.Controls.Add(new Label { Text = "Recent sessions to check", AutoSize = true, Padding = new Padding(0, 5, 0, 0) });
+        sessionRow.Controls.Add(recentSessions);
+        goalSettings.Controls.Add(sessionRow);
+        goalSettings.Controls.Add(new Label { Width = 520, Height = 78,
+            Text = "Checks recent local desktop, CLI and IDE sessions, newest first.\nUses your Codex profile directly; no prompt or model call." });
+        var actionSettings = new Panel { Dock = DockStyle.Fill };
+        actionSettings.Controls.Add(prompt); actionSettings.Controls.Add(goalSettings);
+        actionSettingsLabel = AddRow(4, "Codex prompt", actionSettings);
         var folderRow = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 2, RowCount = 1 };
         folderRow.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100)); folderRow.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 90));
         folderRow.Controls.Add(folder, 0, 0); folderRow.Controls.Add(Button("Browse…", (_, _) => BrowseFolder()), 1, 0);
@@ -91,16 +103,18 @@ internal sealed class PromptRulesForm : Form
         var button = new Button { Text = text, MinimumSize = new Size(95, 32), AutoSize = true };
         button.Click += action; return button;
     }
-    private void AddRow(int row, string label, Control control)
+    private Label AddRow(int row, string label, Control control)
     {
-        editor.Controls.Add(new Label { Text = label, Dock = DockStyle.Fill, Padding = new Padding(0, 5, 0, 0) }, 0, row);
+        var caption = new Label { Text = label, Dock = DockStyle.Fill, Padding = new Padding(0, 5, 0, 0) };
+        editor.Controls.Add(caption, 0, row);
         editor.Controls.Add(control, 1, row);
+        return caption;
     }
     private void CaptureEdits()
     {
         if (loading || selected < 0 || selected >= rules.Count) return;
         rules[selected] = rules[selected] with { Name = name.Text.Trim(), Enabled = enabled.Checked, Action = (PromptAction)action.SelectedIndex, Scope = (QuotaScope)quota.SelectedIndex,
-            Direction = (ThresholdDirection)direction.SelectedIndex, Threshold = (double)threshold.Value, Prompt = prompt.Text,
+            Direction = (ThresholdDirection)direction.SelectedIndex, Threshold = (double)threshold.Value, Prompt = prompt.Text, RecentSessionLimit = (int)recentSessions.Value,
             WorkingDirectory = folder.Text.Trim(), Permissions = (PromptPermissions)permissions.SelectedIndex, TimeoutMinutes = (int)timeout.Value };
     }
     private void SelectRule()
@@ -110,7 +124,7 @@ internal sealed class PromptRulesForm : Form
         if (selected >= 0)
         {
             var rule = rules[selected]; name.Text = rule.Name; enabled.Checked = rule.Enabled; action.SelectedIndex = (int)rule.Action; quota.SelectedIndex = (int)rule.Scope;
-            direction.SelectedIndex = (int)rule.Direction; threshold.Value = (decimal)rule.Threshold; prompt.Text = rule.Prompt;
+            direction.SelectedIndex = (int)rule.Direction; threshold.Value = (decimal)rule.Threshold; prompt.Text = rule.Prompt; recentSessions.Value = rule.RecentSessionLimit;
             folder.Text = rule.WorkingDirectory; permissions.SelectedIndex = (int)rule.Permissions; timeout.Value = rule.TimeoutMinutes;
         }
         loading = false; UpdateAction(); UpdateStatus();
@@ -118,14 +132,16 @@ internal sealed class PromptRulesForm : Form
     private void UpdateAction()
     {
         var direct = action.SelectedIndex > 0;
-        prompt.Enabled = !direct; folder.Parent!.Enabled = !direct; permissions.Enabled = !direct; timeout.Enabled = !direct;
+        prompt.Visible = !direct; goalSettings.Visible = direct;
+        actionSettingsLabel.Text = direct ? "Goal action" : "Codex prompt";
+        folder.Parent!.Enabled = !direct; permissions.Enabled = !direct; timeout.Enabled = !direct;
         actionNote.Text = direct
-            ? "Checks 20 recent non-archived local sessions through goal APIs (60-second limit). No model call.\nPreserves objectives and budgets; skips blocked, completed, and budget-limited goals."
-            : "Runs a separate CLI session with your Codex login and model; consumes quota.\nDesktop chat tools are not supplied. Extra permissions cannot be approved during a run.";
+            ? "Direct goal API action (60-second limit). Preserves objectives and budgets.\nSkips blocked, completed, usage-limited and budget-limited goals."
+            : "Runs a separate CLI session and consumes quota; desktop chat tools are unavailable.\nTo pause or resume goals across sessions, select a direct goal action above.";
     }
     private void RefreshList(int index)
     {
-        loading = true; list.Items.Clear(); foreach (var rule in rules) list.Items.Add((rule.Enabled ? "● " : "○ ") + rule.Name);
+        loading = true; list.Items.Clear(); foreach (var rule in rules) list.Items.Add((rule.Enabled ? "● " : "○ ") + rule.Name + (rule.Action == PromptAction.CodexPrompt ? " · prompt" : " · direct"));
         selected = -1; list.SelectedIndex = index; loading = false; SelectRule();
     }
     private void AddRule() { CaptureEdits(); if (rules.Count >= 32) return; rules.Add(new()); RefreshList(rules.Count - 1); }
@@ -156,6 +172,12 @@ internal sealed class PromptRulesForm : Form
     {
         if (selected >= 0 && (quota.SelectedItem is null || direction.SelectedItem is null || permissions.SelectedItem is null || action.SelectedItem is null))
             throw new InvalidOperationException("A rule selector has no selected value.");
+        if (selected >= 0)
+        {
+            var before = rules[selected];
+            CaptureEdits();
+            if (rules[selected] != before) throw new InvalidOperationException("The editor changed a rule without user edits.");
+        }
     }
     protected override void Dispose(bool disposing) { if (disposing) refresh.Dispose(); base.Dispose(disposing); }
 }

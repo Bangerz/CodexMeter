@@ -14,6 +14,7 @@ public sealed record PromptRule
     public string Name { get; init; } = "New rule";
     public bool Enabled { get; init; }
     public PromptAction Action { get; init; }
+    public int RecentSessionLimit { get; init; } = 20;
     public QuotaScope Scope { get; init; }
     public ThresholdDirection Direction { get; init; }
     public double Threshold { get; init; } = 80;
@@ -38,6 +39,8 @@ public sealed record PromptRule
             throw new FormatException($"{Name}: choose an absolute working folder.");
         if (Action == PromptAction.CodexPrompt && Enabled && !Directory.Exists(WorkingDirectory))
             throw new FormatException($"{Name}: the working folder does not exist.");
+        if (RecentSessionLimit is < 1 or > 100)
+            throw new FormatException($"{Name}: select between 1 and 100 recent sessions.");
     }
 
     public bool SameTriggerAndAction(PromptRule other) => this with { Name = other.Name } == other;

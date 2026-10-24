@@ -8,9 +8,11 @@ internal static class Program
     private static int Main(string[] args)
     {
         ApplicationConfiguration.Initialize();
-        if (args.Length == 2 && args[0] == "--goal-status")
+        if (args.Length is 2 or 3 && args[0] == "--goal-status")
         {
-            var result = new CodexGoalController().InspectAsync().GetAwaiter().GetResult();
+            var limit = 20;
+            if (args.Length == 3 && (!int.TryParse(args[2], out limit) || limit is < 1 or > 100)) return 2;
+            var result = new CodexGoalController().InspectAsync(recentSessionLimit: limit).GetAwaiter().GetResult();
             File.WriteAllText(Path.GetFullPath(args[1]), JsonSerializer.Serialize(result));
             return result.Failed == 0 ? 0 : 1;
         }
