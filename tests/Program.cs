@@ -12,6 +12,7 @@ internal static class Program
         if (args.Contains("app-server")) return Environment.GetEnvironmentVariable("METER_GOAL_TEST") is not null
             ? await GoalChecks.FakeServer() : await FakeServer();
         if (args.Contains("--goal-check")) return await GoalChecks.Run();
+        if (args.Contains("--desktop-chat-check")) return await DesktopChatChecks.Run();
         if (args.Contains("exec")) return await PromptChecks.FakeCodex(args);
         if (args.Contains("--prompt-check")) return await PromptChecks.Run();
         if (args.Length == 2 && args[0] == "--cost-file")

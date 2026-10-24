@@ -7,7 +7,7 @@ internal sealed class PromptRulesForm : Form
     private readonly ListBox list = new() { Dock = DockStyle.Fill, IntegralHeight = false };
     private readonly TextBox name = new() { Dock = DockStyle.Fill, MaxLength = 80 };
     private readonly CheckBox enabled = new() { Text = "Enable this rule", AutoSize = true };
-    private readonly ComboBox action = Choice("Run Codex prompt", "Pause recent goals (direct)", "Resume recent goals (direct)");
+    private readonly ComboBox action = Choice("Run CLI prompt in folder", "Pause recent goals (direct)", "Resume recent goals (direct)", "Send to desktop chat");
     private readonly Label actionNote = new() { Dock = DockStyle.Fill };
     private readonly ComboBox quota = Choice("Lowest remaining across all windows", "Codex weekly", "Codex 5-hour");
     private readonly ComboBox direction = Choice("Rises to or above (≥)", "Falls to or below (≤)");
@@ -17,8 +17,18 @@ internal sealed class PromptRulesForm : Form
     private readonly FlowLayoutPanel goalSettings = new() { Dock = DockStyle.Fill, FlowDirection = FlowDirection.TopDown, WrapContents = false };
     private readonly Label actionSettingsLabel;
     private readonly TextBox folder = new() { Dock = DockStyle.Fill };
+    private readonly TextBox desktopThread = new() { Dock = DockStyle.Fill, PlaceholderText = "Chat UUID or codex://threads/... link" };
+    private readonly Button chooseChat;
+    private readonly Control folderRow;
+    private readonly Control desktopRow;
+    private readonly Label destinationLabel;
+    private string desktopTitle = "";
+    private readonly CancellationTokenSource lifetime = new();
     private readonly ComboBox permissions = Choice("Read-only", "Allow edits in working folder");
+    private readonly Label desktopPermissions = new() { Dock = DockStyle.Fill, Text = "Uses the destination chat's settings and available tools.", Padding = new Padding(0, 5, 0, 0) };
     private readonly NumericUpDown timeout = new() { Minimum = 1, Maximum = 60, Width = 70 };
+    private readonly Control timeRow;
+    private readonly Label desktopTimeout = new() { Dock = DockStyle.Fill, Text = "30 seconds to confirm submission; chat runs independently.", Padding = new Padding(0, 5, 0, 0) };
     private readonly Label status = new() { Dock = DockStyle.Fill, AutoEllipsis = true };
     private readonly TextBox result = new() { Dock = DockStyle.Fill, Multiline = true, ReadOnly = true, ScrollBars = ScrollBars.Vertical };
     private readonly TableLayoutPanel editor;
@@ -74,13 +84,21 @@ internal sealed class PromptRulesForm : Form
         var actionSettings = new Panel { Dock = DockStyle.Fill };
         actionSettings.Controls.Add(prompt); actionSettings.Controls.Add(goalSettings);
         actionSettingsLabel = AddRow(4, "Codex prompt", actionSettings);
-        var folderRow = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 2, RowCount = 1 };
-        folderRow.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100)); folderRow.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 90));
-        folderRow.Controls.Add(folder, 0, 0); folderRow.Controls.Add(Button("Browse…", (_, _) => BrowseFolder()), 1, 0);
-        AddRow(5, "Working folder", folderRow); AddRow(6, "Permissions", permissions);
-        var timeRow = new FlowLayoutPanel { Dock = DockStyle.Fill, WrapContents = false };
+        var folders = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 2, RowCount = 1 };
+        folders.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100)); folders.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 110));
+        folders.Controls.Add(folder, 0, 0); folders.Controls.Add(Button("Browse…", (_, _) => BrowseFolder()), 1, 0); folderRow = folders;
+        var chats = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 2, RowCount = 1 };
+        chats.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100)); chats.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 110));
+        chooseChat = Button("Choose…", async (_, _) => await ChooseDesktopChatAsync());
+        chats.Controls.Add(desktopThread, 0, 0); chats.Controls.Add(chooseChat, 1, 0); desktopRow = chats;
+        var destination = new Panel { Dock = DockStyle.Fill }; destination.Controls.Add(folderRow); destination.Controls.Add(desktopRow);
+        destinationLabel = AddRow(5, "Working folder", destination);
+        var permissionSettings = new Panel { Dock = DockStyle.Fill }; permissionSettings.Controls.Add(permissions); permissionSettings.Controls.Add(desktopPermissions);
+        AddRow(6, "Permissions", permissionSettings);
+        timeRow = new FlowLayoutPanel { Dock = DockStyle.Fill, WrapContents = false };
         timeRow.Controls.Add(timeout); timeRow.Controls.Add(new Label { Text = "minutes maximum per run", AutoSize = true, Padding = new Padding(0, 5, 0, 0) });
-        AddRow(7, "Timeout", timeRow);
+        var timeSettings = new Panel { Dock = DockStyle.Fill }; timeSettings.Controls.Add(timeRow); timeSettings.Controls.Add(desktopTimeout);
+        AddRow(7, "Timeout", timeSettings);
         editor.Controls.Add(actionNote, 0, 8); editor.SetColumnSpan(actionNote, 2);
         AddRow(9, "Last attempt", status); AddRow(10, "Final response", result); shell.Controls.Add(editor, 1, 1);
         var footer = new FlowLayoutPanel { Dock = DockStyle.Fill, FlowDirection = FlowDirection.RightToLeft, WrapContents = false };
@@ -115,6 +133,7 @@ internal sealed class PromptRulesForm : Form
         if (loading || selected < 0 || selected >= rules.Count) return;
         rules[selected] = rules[selected] with { Name = name.Text.Trim(), Enabled = enabled.Checked, Action = (PromptAction)action.SelectedIndex, Scope = (QuotaScope)quota.SelectedIndex,
             Direction = (ThresholdDirection)direction.SelectedIndex, Threshold = (double)threshold.Value, Prompt = prompt.Text, RecentSessionLimit = (int)recentSessions.Value,
+            DesktopThreadId = ParseDesktopThreadId(desktopThread.Text), DesktopThreadTitle = desktopTitle,
             WorkingDirectory = folder.Text.Trim(), Permissions = (PromptPermissions)permissions.SelectedIndex, TimeoutMinutes = (int)timeout.Value };
     }
     private void SelectRule()
@@ -126,22 +145,27 @@ internal sealed class PromptRulesForm : Form
             var rule = rules[selected]; name.Text = rule.Name; enabled.Checked = rule.Enabled; action.SelectedIndex = (int)rule.Action; quota.SelectedIndex = (int)rule.Scope;
             direction.SelectedIndex = (int)rule.Direction; threshold.Value = (decimal)rule.Threshold; prompt.Text = rule.Prompt; recentSessions.Value = rule.RecentSessionLimit;
             folder.Text = rule.WorkingDirectory; permissions.SelectedIndex = (int)rule.Permissions; timeout.Value = rule.TimeoutMinutes;
+            desktopThread.Text = rule.DesktopThreadId; desktopTitle = rule.DesktopThreadTitle;
         }
         loading = false; UpdateAction(); UpdateStatus();
     }
     private void UpdateAction()
     {
-        var direct = action.SelectedIndex > 0;
+        var direct = (PromptAction)action.SelectedIndex is PromptAction.PauseRecentGoals or PromptAction.ResumeRecentGoals;
+        var desktop = (PromptAction)action.SelectedIndex == PromptAction.SendToDesktopChat;
         prompt.Visible = !direct; goalSettings.Visible = direct;
         actionSettingsLabel.Text = direct ? "Goal action" : "Codex prompt";
-        folder.Parent!.Enabled = !direct; permissions.Enabled = !direct; timeout.Enabled = !direct;
-        actionNote.Text = direct
+        folderRow.Visible = !desktop; desktopRow.Visible = desktop; destinationLabel.Text = desktop ? "Desktop chat" : "Working folder";
+        folderRow.Enabled = !direct; permissions.Visible = !desktop; permissions.Enabled = !direct; desktopPermissions.Visible = desktop;
+        timeRow.Visible = !desktop; timeout.Enabled = !direct; desktopTimeout.Visible = desktop;
+        actionNote.Text = desktop ? "Sends once to an existing local Codex chat through the open desktop app. Consumes quota.\nNo automatic retry. Submission is not completion; read the response in that chat."
+            : direct
             ? "Direct goal API action (60-second limit). Preserves objectives and budgets.\nSkips blocked, completed, usage-limited and budget-limited goals."
             : "Runs a separate CLI session and consumes quota; desktop chat tools are unavailable.\nTo pause or resume goals across sessions, select a direct goal action above.";
     }
     private void RefreshList(int index)
     {
-        loading = true; list.Items.Clear(); foreach (var rule in rules) list.Items.Add((rule.Enabled ? "● " : "○ ") + rule.Name + (rule.Action == PromptAction.CodexPrompt ? " · prompt" : " · direct"));
+        loading = true; list.Items.Clear(); foreach (var rule in rules) list.Items.Add((rule.Enabled ? "● " : "○ ") + rule.Name + (rule.Action switch { PromptAction.CodexPrompt => " · CLI", PromptAction.SendToDesktopChat => " · desktop", _ => " · direct" }));
         selected = -1; list.SelectedIndex = index; loading = false; SelectRule();
     }
     private void AddRule() { CaptureEdits(); if (rules.Count >= 32) return; rules.Add(new()); RefreshList(rules.Count - 1); }
@@ -151,6 +175,38 @@ internal sealed class PromptRulesForm : Form
         using var dialog = new FolderBrowserDialog { Description = "Choose the Codex working folder", UseDescriptionForTitle = true,
             SelectedPath = Directory.Exists(folder.Text) ? folder.Text : AppContext.BaseDirectory };
         if (dialog.ShowDialog(this) == DialogResult.OK) folder.Text = dialog.SelectedPath;
+    }
+    private async Task ChooseDesktopChatAsync()
+    {
+        chooseChat.Enabled = false;
+        try
+        {
+            var chats = await new CodexDesktopChatClient().ListAsync(lifetime.Token);
+            if (IsDisposed) return;
+            using var picker = new Form { Text = "Choose a local Codex desktop chat", Size = new Size(720, 450), StartPosition = FormStartPosition.CenterParent,
+                Font = Font, MinimizeBox = false, MaximizeBox = false };
+            var choices = new ListBox { Dock = DockStyle.Fill, IntegralHeight = false, HorizontalScrollbar = true };
+            choices.Items.AddRange(chats.Cast<object>().ToArray());
+            var identity = new Label { Dock = DockStyle.Bottom, Height = 30, Text = "Select a chat to see its UUID." };
+            choices.SelectedIndexChanged += (_, _) => identity.Text = (choices.SelectedItem as DesktopChat)?.Id ?? "";
+            var select = Button("Select chat", (_, _) => { if (choices.SelectedItem is not null) picker.DialogResult = DialogResult.OK; });
+            select.Dock = DockStyle.Bottom;
+            picker.Controls.Add(choices); picker.Controls.Add(identity); picker.Controls.Add(select); picker.AcceptButton = select;
+            choices.DoubleClick += (_, _) => { if (choices.SelectedItem is not null) picker.DialogResult = DialogResult.OK; };
+            if (picker.ShowDialog(this) == DialogResult.OK && choices.SelectedItem is DesktopChat chat)
+            { desktopThread.Text = chat.Id; desktopTitle = chat.Title; }
+        }
+        catch (Exception ex) when (ex is DesktopBridgeException or GoalApiException or UsageException or IOException or OperationCanceledException or UnauthorizedAccessException or System.ComponentModel.Win32Exception or System.Text.Json.JsonException or KeyNotFoundException or InvalidOperationException)
+        {
+            if (!IsDisposed && !lifetime.IsCancellationRequested) MessageBox.Show(this, "Could not list desktop chats. Open Codex and try again, or paste a local chat's UUID/link.", "Desktop chats", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+        }
+        finally { if (!IsDisposed) chooseChat.Enabled = true; }
+    }
+    internal static string ParseDesktopThreadId(string text)
+    {
+        text = text.Trim();
+        if (Uri.TryCreate(text, UriKind.Absolute, out var uri) && uri.Scheme == "codex" && uri.Host == "threads") text = uri.AbsolutePath.Trim('/');
+        return Guid.TryParse(text, out var id) ? id.ToString() : text;
     }
     private void UpdateStatus()
     {
@@ -179,5 +235,5 @@ internal sealed class PromptRulesForm : Form
             if (rules[selected] != before) throw new InvalidOperationException("The editor changed a rule without user edits.");
         }
     }
-    protected override void Dispose(bool disposing) { if (disposing) refresh.Dispose(); base.Dispose(disposing); }
+    protected override void Dispose(bool disposing) { if (disposing) { lifetime.Cancel(); refresh.Dispose(); lifetime.Dispose(); } base.Dispose(disposing); }
 }

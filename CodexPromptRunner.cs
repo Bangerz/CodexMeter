@@ -26,6 +26,8 @@ public sealed class CodexPromptRunner
 
     public async Task<PromptRunResult> RunAsync(PromptRule rule, CancellationToken cancellationToken)
     {
+        if (rule.Action == PromptAction.SendToDesktopChat)
+            return await new CodexDesktopChatClient().SendAsync(rule, cancellationToken);
         if (rule.Action != PromptAction.CodexPrompt)
             return await new CodexGoalController().RunAsync(rule, cancellationToken);
         using var deadline = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);

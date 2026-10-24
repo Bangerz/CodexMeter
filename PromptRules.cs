@@ -6,7 +6,7 @@ namespace CodexMeter;
 public enum QuotaScope { MostLimited, CodexWeekly, CodexFiveHour }
 public enum ThresholdDirection { RisesToOrAbove, FallsToOrBelow }
 public enum PromptPermissions { ReadOnly, WorkspaceWrite }
-public enum PromptAction { CodexPrompt, PauseRecentGoals, ResumeRecentGoals }
+public enum PromptAction { CodexPrompt, PauseRecentGoals, ResumeRecentGoals, SendToDesktopChat }
 
 public sealed record PromptRule
 {
@@ -15,6 +15,8 @@ public sealed record PromptRule
     public bool Enabled { get; init; }
     public PromptAction Action { get; init; }
     public int RecentSessionLimit { get; init; } = 20;
+    public string DesktopThreadId { get; init; } = "";
+    public string DesktopThreadTitle { get; init; } = "";
     public QuotaScope Scope { get; init; }
     public ThresholdDirection Direction { get; init; }
     public double Threshold { get; init; } = 80;
@@ -33,8 +35,10 @@ public sealed record PromptRule
         if (!Enum.IsDefined(Scope) || !Enum.IsDefined(Direction) || !Enum.IsDefined(Permissions) || !Enum.IsDefined(Action)
             || !double.IsFinite(Threshold) || Threshold is < 0 or > 100 || TimeoutMinutes is < 1 or > 60)
             throw new FormatException($"{Name}: select a valid quota, direction, threshold (0–100), and timeout (1–60 minutes).");
-        if (Action == PromptAction.CodexPrompt && (string.IsNullOrWhiteSpace(Prompt) || Prompt.Length > 32_000))
+        if (Action is PromptAction.CodexPrompt or PromptAction.SendToDesktopChat && (string.IsNullOrWhiteSpace(Prompt) || Prompt.Length > 32_000))
             throw new FormatException($"{Name}: enter a prompt of at most 32,000 characters.");
+        if (Action == PromptAction.SendToDesktopChat && (!Guid.TryParse(DesktopThreadId, out var threadId) || threadId == Guid.Empty))
+            throw new FormatException($"{Name}: choose a local Codex desktop chat or enter its UUID.");
         if (Action == PromptAction.CodexPrompt && (string.IsNullOrWhiteSpace(WorkingDirectory) || !Path.IsPathFullyQualified(WorkingDirectory)))
             throw new FormatException($"{Name}: choose an absolute working folder.");
         if (Action == PromptAction.CodexPrompt && Enabled && !Directory.Exists(WorkingDirectory))

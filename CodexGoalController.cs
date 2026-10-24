@@ -12,7 +12,7 @@ public sealed class CodexGoalController
     public async Task<PromptRunResult> RunAsync(PromptRule rule, CancellationToken token)
     {
         rule.Validate();
-        if (rule.Action == PromptAction.CodexPrompt) throw new ArgumentException("Select a goal action.");
+        if (rule.Action is not (PromptAction.PauseRecentGoals or PromptAction.ResumeRecentGoals)) throw new ArgumentException("Select a goal action.");
         var result = await InspectOrChangeAsync(rule.Action, rule.RecentSessionLimit, token);
         return new(result.Failed == 0 ? "Completed" : result.Changed > 0 ? "Partially completed" : "Failed",
             $"Checked {result.Checked} recent non-archived sessions. {result.Changed} goals {result.Verb}. "
